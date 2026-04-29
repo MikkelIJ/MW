@@ -23,3 +23,4 @@ Regions are stored at `~/Library/Application Support/SnapRegions/regions.json` a
 - v1 targets the main display only.
 - The hotkey is hard-coded to ⌥Space. Edit `registerHotkey()` in [Sources/SnapRegions/AppDelegate.swift](Sources/SnapRegions/AppDelegate.swift) to change it.
 # MW
+# MW
