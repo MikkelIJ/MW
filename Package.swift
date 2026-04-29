@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "SnapRegions",
+    name: "mikkelsworkspace",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "SnapRegions",
-            path: "Sources/SnapRegions",
+            name: "mikkelsworkspace",
+            path: "Sources/mikkelsworkspace",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),

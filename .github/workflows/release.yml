@@ -39,7 +39,7 @@ jobs:
 
       - name: Rename bundle to MW.app
         run: |
-          mv build/SnapRegions.app build/MW.app
+          mv build/mikkelsworkspace.app build/MW.app
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.ver.outputs.version }}" build/MW.app/Contents/Info.plist || true
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.ver.outputs.version }}"            build/MW.app/Contents/Info.plist || true
           codesign --force --deep --sign - build/MW.app

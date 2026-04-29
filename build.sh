@@ -2,9 +2,9 @@
 set -euo pipefail
 
 CONFIG="${1:-release}"
-APP_NAME="SnapRegions"
+APP_NAME="mikkelsworkspace"
 DISPLAY_NAME="MW"
-BUNDLE_ID="local.snapregions"
+BUNDLE_ID="local.mikkelsworkspace"
 
 echo "→ Building ($CONFIG)…"
 swift build -c "$CONFIG"

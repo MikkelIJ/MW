@@ -206,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.instantSnap(toRegionIndex: i)
             }
             if hk == nil {
-                NSLog("SnapRegions: failed to register instant snap #\(i + 1) (\(combo.display))")
+                NSLog("mikkelsworkspace: failed to register instant snap #\(i + 1) (\(combo.display))")
             }
             instantHotkeys[i] = hk
         }
@@ -271,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let a = NSAlert()
         a.messageText = "No focused window to snap"
         a.informativeText = """
-        SnapRegions couldn’t find a focused window when you triggered the \
+        MW couldn’t find a focused window when you triggered the \
         hotkey. Click into the window you want to snap, then press \
         \(currentCombo.display) again.
 
@@ -285,10 +285,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let a = NSAlert()
         a.messageText = "Accessibility access required"
         a.informativeText = """
-        SnapRegions needs Accessibility permission to move windows in other apps.
+        MW needs Accessibility permission to move windows in other apps.
 
         If you previously granted it to an older build, remove the existing \
-        “SnapRegions” entry first (select it and press –), then add this \
+        “MW” entry first (select it and press –), then add this \
         bundle again and re-launch the app.
         """
         a.addButton(withTitle: "Open Settings")

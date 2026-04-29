@@ -96,7 +96,7 @@ struct KeyCombo: Codable, Equatable {
 }
 
 extension KeyCombo {
-    private static let key = "snapRegions.hotkey"
+    private static let key = "mikkelsworkspace.hotkey"
 
     static func load() -> KeyCombo {
         guard let data = UserDefaults.standard.data(forKey: key),

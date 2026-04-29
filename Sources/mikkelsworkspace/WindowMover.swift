@@ -25,7 +25,7 @@ enum WindowMover {
                 let app = AXUIElementCreateApplication(pid)
                 return windowOf(app: app)
             }
-            NSLog("SnapRegions: focusedApplication failed status=\(appStatus.rawValue)")
+            NSLog("mikkelsworkspace: focusedApplication failed status=\(appStatus.rawValue)")
             return nil
         }
         let app = appCF as! AXUIElement
@@ -72,7 +72,7 @@ enum WindowMover {
     @discardableResult
     static func move(window: AXUIElement?, to frameNS: NSRect) -> MoveResult {
         guard AXIsProcessTrusted() else {
-            NSLog("SnapRegions: AX not trusted")
+            NSLog("mikkelsworkspace: AX not trusted")
             return .notTrusted
         }
         guard let window else { return .noWindow }
@@ -114,7 +114,7 @@ enum WindowMover {
            abs(actual.origin.y - pos.y)         > 2 ||
            abs(actual.size.width  - size.width)  > 2 ||
            abs(actual.size.height - size.height) > 2 {
-            NSLog("SnapRegions: drift after first move target=\(pos),\(size) actual=\(actual); retrying")
+            NSLog("mikkelsworkspace: drift after first move target=\(pos),\(size) actual=\(actual); retrying")
             // Tiny delay to let the app settle.
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
             _ = setSize(window, size)
@@ -126,14 +126,14 @@ enum WindowMover {
                abs(actual2.origin.y - pos.y)         > 2 ||
                abs(actual2.size.width  - size.width)  > 2 ||
                abs(actual2.size.height - size.height) > 2 {
-                NSLog("SnapRegions: drift persisted target=\(pos),\(size) actual=\(actual2)")
+                NSLog("mikkelsworkspace: drift persisted target=\(pos),\(size) actual=\(actual2)")
             }
         }
 
         let posErr  = posErr2  != .success ? posErr2  : posErr1
         let sizeErr = sizeErr2 != .success ? sizeErr2 : sizeErr1
         if posErr != .success || sizeErr != .success {
-            NSLog("SnapRegions: AX move failed pid=\(owner.pid) pos=\(posErr.rawValue) size=\(sizeErr.rawValue)")
+            NSLog("mikkelsworkspace: AX move failed pid=\(owner.pid) pos=\(posErr.rawValue) size=\(sizeErr.rawValue)")
             return .axError(position: posErr, size: sizeErr)
         }
         return .ok

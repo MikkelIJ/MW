@@ -38,7 +38,7 @@ final class RegionStore {
     private var url: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory,
                                            in: .userDomainMask)[0]
-            .appendingPathComponent("SnapRegions", isDirectory: true)
+            .appendingPathComponent("mikkelsworkspace", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir,
                                                  withIntermediateDirectories: true)
         return dir.appendingPathComponent("regions.json")

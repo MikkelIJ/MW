@@ -42,7 +42,7 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: contentW, height: contentH),
                          styleMask: [.titled, .closable],
                          backing: .buffered, defer: false)
-        w.title = "SnapRegions Preferences"
+        w.title = "MW Preferences"
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.center()

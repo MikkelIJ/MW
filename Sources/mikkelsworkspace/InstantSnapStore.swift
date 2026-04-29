@@ -5,7 +5,7 @@ import Foundation
 /// currently lives on.
 enum InstantSnapStore {
     static let slotCount = 6
-    private static let key = "snapRegions.instantSnaps"
+    private static let key = "mikkelsworkspace.instantSnaps"
 
     static func load() -> [KeyCombo?] {
         var result: [KeyCombo?] = Array(repeating: nil, count: slotCount)
