@@ -1,46 +1,37 @@
 # MW — Mikkel's Workspace
 
-A tiny macOS menu-bar app for snapping windows into custom-drawn regions across one or more displays.
+A tiny menu-bar / system-tray app for snapping windows into custom-drawn regions across one or more displays. Available for **macOS** (Swift / AppKit) and **Windows 11** (WPF / .NET 8).
 
-`MW` stands for **Mikkel's Workspace**. It was made out of need and curiosity about how to build an app like this for macOS.
+`MW` stands for **Mikkel's Workspace**. It was made out of need and curiosity about how to build an app like this — first for macOS, then ported to Windows.
 
 - Repository: <https://github.com/MikkelIJ/MW>
-- Clone: `git clone https://github.com/MikkelIJ/MW.git`
 - Releases: <https://github.com/MikkelIJ/MW/releases>
 
-## Install
-
-One-liner (downloads the latest release from this repo and installs to `/Applications`):
+## Install — macOS
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/MikkelIJ/MW/main/install.sh | bash
 ```
 
-Pin to a specific version:
+Pin a version: `… | MW_VERSION=v0.1.0 bash`. Change destination: `… | MW_DEST="$HOME/Applications" bash`.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/MikkelIJ/MW/main/install.sh | MW_VERSION=v0.1.0 bash
+The installer downloads `MW.zip` from the latest GitHub release, verifies its SHA-256, strips the macOS quarantine attribute, and copies `MW.app` into `/Applications`.
+
+On first launch macOS will prompt for **Accessibility** permission (System Settings → Privacy & Security → Accessibility) — required to move other apps' windows.
+
+## Install — Windows 11
+
+In an elevated-or-normal PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/MikkelIJ/MW/main/install.ps1 | iex
 ```
 
-Install somewhere other than `/Applications`:
+Pin a version: `$env:MW_VERSION='v0.2.0'; irm … | iex`. Change destination: `$env:MW_DEST="$env:LOCALAPPDATA\MW"; irm … | iex` (default).
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/MikkelIJ/MW/main/install.sh | MW_DEST="$HOME/Applications" bash
-```
+The installer downloads `MW-windows-x64.zip`, verifies its SHA-256, extracts to `%LOCALAPPDATA%\MW`, and creates a Start Menu shortcut. The published binary is a self-contained single-file `MW.exe` (no .NET install required).
 
-The installer:
-- Resolves the latest (or pinned) release tag from GitHub.
-- Downloads `MW.zip` and verifies its SHA-256 checksum.
-- Strips the macOS quarantine attribute (the build is ad-hoc signed, not notarized).
-- Copies `MW.app` into the destination, replacing any existing copy.
-
-After install:
-
-```sh
-open /Applications/MW.app
-```
-
-On first launch macOS will prompt for **Accessibility** permission (System Settings → Privacy & Security → Accessibility). This is required to move other apps' windows.
+The Windows build is **not** signed; SmartScreen may show a warning the first time you run it.
 
 ## What it does
 - Lives in the menu bar (no Dock icon, no main window).
@@ -54,6 +45,7 @@ Regions are stored at `~/Library/Application Support/mikkelsworkspace/regions.js
 
 ## Build from source
 
+### macOS
 Requires Xcode command-line tools (Swift 5.9+) on macOS 13+.
 
 ```sh
@@ -63,20 +55,34 @@ cd MW
 open build/mikkelsworkspace.app
 ```
 
-The build script compiles with SwiftPM, assembles a `.app` bundle (display name `MW`, executable `mikkelsworkspace`), generates an `.icns` from `icon.png`, and ad-hoc signs the result.
+### Windows
+Requires the .NET 8 SDK on Windows 10/11.
 
-## Releasing
+Two GitHub Actions workflows are triggered when a `v*` tag is pushed:
 
-Releases are produced by the GitHub Actions workflow at [.github/workflows/release.yml](.github/workflows/release.yml). It runs on a macOS runner whenever a `v*` tag is pushed (or via manual dispatch) and:
+- [.github/workflows/release.yml](.github/workflows/release.yml) — macOS build (`MW.zip` + `MW.zip.sha256`).
+- [.github/workflows/release-windows.yml](.github/workflows/release-windows.yml) — Windows build (`MW-windows-x64.zip` + `MW-windows-x64.zip.sha256`).
 
-1. Builds the app with `./build.sh release`.
-2. Renames the bundle to `MW.app` and stamps the tag's version into `Info.plist`.
-3. Re-signs ad-hoc, zips the bundle as `MW.zip`, and computes `MW.zip.sha256`.
-4. Creates a GitHub Release with auto-generated notes and uploads both files.
+Both upload to the same GitHub Release.
 
 Cut a new release:
 
 ```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Once both workflows finish, the `install.sh` and `install.ps1` one-liners pick up the new version automatically.
+
+## Project layout
+- [Sources/mikkelsworkspace/](Sources/mikkelsworkspace) — macOS Swift sources (AppKit).
+- [windows/MW/](windows/MW) — Windows WPF / .NET 8 app.
+- [windows/MW.sln](windows/MW.sln) — Visual Studio solution.
+- [build.sh](build.sh) — macOS packaging script.
+- [install.sh](install.sh) / [install.ps1](install.ps1) — release installers.
+- [.github/workflows/](.github/workflows) — CI release pipelines.
+- [Package.swift](Package.swift) — SwiftPM manifest.
+- [tools/render-svg.swift](tools/render-svg.swift) — SVG → PNG rasterizer used by `build.sh`
 git tag v0.2.0
 git push origin v0.2.0
 ```
