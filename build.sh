@@ -19,9 +19,29 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$CONTENTS/Resources"
 cp "$BIN_PATH" "$MACOS/$APP_NAME"
 
-# Build AppIcon.icns from icon.png if present.
+# Prepare icon sources. Prefer MW.svg (vector); fall back to icon.png.
+SVG_SRC="MW.svg"
 ICON_SRC="icon.png"
 ICON_NAME="AppIcon"
+RENDER="tools/render-svg.swift"
+
+if [[ -f "$SVG_SRC" && -f "$RENDER" ]]; then
+  echo "→ Rendering icons from $SVG_SRC"
+  mkdir -p build
+  APP_ICON_SRC="build/AppIconSource.png"
+  MENUBAR_SRC="build/MenuBarIcon.png"
+  swift "$RENDER" "$SVG_SRC" "$APP_ICON_SRC" 1024
+  # Menu bar icon: high-res template (alpha mask only) so macOS auto-tints
+  # for both light and dark menu bars.
+  swift "$RENDER" "$SVG_SRC" "$MENUBAR_SRC" 64 --template
+  ICON_SRC="$APP_ICON_SRC"
+  MENUBAR_OUT="$MENUBAR_SRC"
+elif [[ -f "$ICON_SRC" ]]; then
+  MENUBAR_OUT="$ICON_SRC"
+else
+  MENUBAR_OUT=""
+fi
+
 if [[ -f "$ICON_SRC" ]]; then
   echo "→ Building $ICON_NAME.icns from $ICON_SRC"
   ICONSET_DIR="build/${ICON_NAME}.iconset"
@@ -44,7 +64,9 @@ if [[ -f "$ICON_SRC" ]]; then
     sips -z "$size" "$size" "$ICON_SRC" --out "$ICONSET_DIR/$name" >/dev/null
   done
   iconutil -c icns "$ICONSET_DIR" -o "$CONTENTS/Resources/${ICON_NAME}.icns"
-  cp "$ICON_SRC" "$CONTENTS/Resources/MenuBarIcon.png"
+  if [[ -n "$MENUBAR_OUT" ]]; then
+    cp "$MENUBAR_OUT" "$CONTENTS/Resources/MenuBarIcon.png"
+  fi
   ICON_PLIST_KEY="<key>CFBundleIconFile</key><string>${ICON_NAME}</string>"
 else
   ICON_PLIST_KEY=""
