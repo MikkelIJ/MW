@@ -26,3 +26,4 @@ Regions are stored at `~/Library/Application Support/SnapRegions/regions.json` a
 # MW
 # MW
 # MW
+# MW
