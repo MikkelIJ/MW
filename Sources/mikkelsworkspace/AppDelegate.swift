@@ -70,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                      action: #selector(showPreferences), keyEquivalent: ",")
         menu.addItem(withTitle: "About MW",
                      action: #selector(showAbout), keyEquivalent: "")
+        menu.addItem(withTitle: "Check for Updates…",
+                     action: #selector(checkForUpdates), keyEquivalent: "")
 
         // Connected displays
         menu.addItem(.separator())
@@ -175,6 +177,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .applicationVersion: "Mikkel’s Workspace",
             .credits: credits,
         ])
+    }
+
+    @objc private func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
+        UpdateChecker.check { [weak self] result in
+            DispatchQueue.main.async {
+                self?.presentUpdateResult(result)
+            }
+        }
+    }
+
+    private func presentUpdateResult(_ result: Result<UpdateChecker.Result, Error>) {
+        let alert = NSAlert()
+        switch result {
+        case .failure(let error):
+            alert.alertStyle = .warning
+            alert.messageText = "Couldn’t check for updates"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        case .success(let info):
+            let current = UpdateChecker.currentVersion
+            if info.isNewer {
+                alert.messageText = "MW \(info.latestTag) is available"
+                alert.informativeText = """
+                You’re running \(current). The latest release is \(info.latestTag).
+
+                Open the release page to download, or copy the install command \
+                to update from the terminal.
+                """
+                alert.addButton(withTitle: "Open Release Page")
+                alert.addButton(withTitle: "Copy Install Command")
+                alert.addButton(withTitle: "Later")
+                let response = alert.runModal()
+                switch response {
+                case .alertFirstButtonReturn:
+                    NSWorkspace.shared.open(info.htmlURL)
+                case .alertSecondButtonReturn:
+                    let cmd = "curl -fsSL https://raw.githubusercontent.com/\(UpdateChecker.repo)/main/install.sh | bash"
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(cmd, forType: .string)
+                default:
+                    break
+                }
+            } else {
+                alert.messageText = "MW is up to date"
+                alert.informativeText = "You’re on \(current) (latest is \(info.latestTag))."
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
     }
 
     @objc private func showPreferences() {
