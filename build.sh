@@ -30,9 +30,12 @@ if [[ -f "$SVG_SRC" && -f "$RENDER" ]]; then
   mkdir -p build
   APP_ICON_SRC="build/AppIconSource.png"
   MENUBAR_SRC="build/MenuBarIcon.png"
-  swift "$RENDER" "$SVG_SRC" "$APP_ICON_SRC" 1024
-  # Menu bar icon: high-res template (alpha mask only) so macOS auto-tints
-  # for both light and dark menu bars.
+  # App icon: white rounded-rect tile with the MW glyph centered and padded
+  # (so it doesn't bleed to the edges of the Dock/Finder icon).
+  swift "$RENDER" "$SVG_SRC" "$APP_ICON_SRC" 1024 \
+    --bg "#FFFFFF" --rounded 0.225 --padding 0.18
+  # Menu bar icon: tight template glyph (alpha mask only) so macOS
+  # auto-tints it for both light and dark menu bars.
   swift "$RENDER" "$SVG_SRC" "$MENUBAR_SRC" 64 --template
   ICON_SRC="$APP_ICON_SRC"
   MENUBAR_OUT="$MENUBAR_SRC"
