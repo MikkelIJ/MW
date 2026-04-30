@@ -2,19 +2,22 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 
-/// Watches global mouse events. While the user is actively dragging
-/// (left mouse button down + moving), pressing **Z** toggles the
-/// snap-region overlay. Releasing the mouse over a region snaps the
-/// focused window into it.
+/// Watches global mouse events. While the user is actively dragging a
+/// window (left mouse button down + window frame moved), pressing **Z**
+/// toggles the snap-region overlay. Releasing the mouse over a region
+/// snaps the focused window into it.
 ///
-/// The Z key is registered as a Carbon hotkey only for the duration of
-/// the drag, so it doesn't interfere with normal typing.
+/// Z is observed via a non-consuming `NSEvent` monitor, NOT a Carbon
+/// hotkey, so the keystroke is never reserved for MW — you can keep
+/// typing “z” in any app while MW is running.
 final class DragSnapMonitor {
     private let store: RegionStore
     private let overlay: OverlayWindowController
 
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
+    private var mouseGlobalMonitor: Any?
+    private var mouseLocalMonitor: Any?
+    private var keyGlobalMonitor: Any?
+    private var keyLocalMonitor: Any?
 
     /// Pixels the mouse must travel after mouse-down before we treat
     /// the gesture as a drag (rather than an incidental click).
@@ -30,9 +33,6 @@ final class DragSnapMonitor {
     }
     private var state: State = .idle
 
-    /// Carbon hotkey for Z; only registered while a drag is in progress.
-    private var zHotkey: Hotkey?
-
     init(store: RegionStore, overlay: OverlayWindowController) {
         self.store = store
         self.overlay = overlay
@@ -41,33 +41,49 @@ final class DragSnapMonitor {
     deinit { stop() }
 
     func start() {
-        let mask: NSEvent.EventTypeMask = [
+        let mouseMask: NSEvent.EventTypeMask = [
             .leftMouseDown, .leftMouseUp, .leftMouseDragged,
         ]
-        if globalMonitor == nil {
-            globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] e in
-                self?.handle(e)
+        if mouseGlobalMonitor == nil {
+            mouseGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseMask) { [weak self] e in
+                self?.handleMouse(e)
             }
         }
-        if localMonitor == nil {
-            localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] e in
-                self?.handle(e)
+        if mouseLocalMonitor == nil {
+            mouseLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseMask) { [weak self] e in
+                self?.handleMouse(e)
+                return e
+            }
+        }
+        // Key monitors observe Z but do NOT consume the event — Z keeps
+        // working everywhere even while MW is running.
+        if keyGlobalMonitor == nil {
+            keyGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
+                self?.handleKey(e)
+            }
+        }
+        if keyLocalMonitor == nil {
+            keyLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+                self?.handleKey(e)
                 return e
             }
         }
     }
 
     func stop() {
-        if let g = globalMonitor { NSEvent.removeMonitor(g); globalMonitor = nil }
-        if let l = localMonitor  { NSEvent.removeMonitor(l); localMonitor  = nil }
-        unregisterZ()
+        for m in [mouseGlobalMonitor, mouseLocalMonitor,
+                  keyGlobalMonitor, keyLocalMonitor] {
+            if let m { NSEvent.removeMonitor(m) }
+        }
+        mouseGlobalMonitor = nil; mouseLocalMonitor = nil
+        keyGlobalMonitor   = nil; keyLocalMonitor   = nil
         if case .dragging(_, let shown) = state, shown { overlay.dismiss() }
         state = .idle
     }
 
     // MARK: - Event handling
 
-    private func handle(_ event: NSEvent) {
+    private func handleMouse(_ event: NSEvent) {
         switch event.type {
         case .leftMouseDown:
             // Capture the focused window + its current frame at the
@@ -86,14 +102,12 @@ final class DragSnapMonitor {
                 let p = NSEvent.mouseLocation
                 guard hypot(p.x - start.x, p.y - start.y) >= dragThreshold else { return }
                 // Only treat this as a window drag if the focused
-                // window's frame actually moved. Otherwise leave Z
-                // alone so it keeps working for normal typing.
+                // window's frame actually moved.
                 guard let win, let initial,
                       let now = WindowMover.frame(of: win),
                       now.origin != initial.origin
                 else { return }
                 state = .dragging(target: win, overlayShown: false)
-                registerZ()
             case .dragging(_, let shown):
                 if shown { overlay.updateDragCursor(NSEvent.mouseLocation) }
             default:
@@ -108,7 +122,6 @@ final class DragSnapMonitor {
                     _ = WindowMover.move(window: target, to: drop)
                 }
             }
-            unregisterZ()
             state = .idle
 
         default:
@@ -116,21 +129,13 @@ final class DragSnapMonitor {
         }
     }
 
-    // MARK: - Z hotkey (drag-scoped)
+    private func handleKey(_ event: NSEvent) {
+        // Only react to Z while a window is actually being dragged.
+        guard case .dragging(let target, let shown) = state,
+              Int(event.keyCode) == kVK_ANSI_Z,
+              event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+        else { return }
 
-    private func registerZ() {
-        guard zHotkey == nil else { return }
-        zHotkey = Hotkey(keyCode: UInt32(kVK_ANSI_Z), modifiers: 0) { [weak self] in
-            self?.toggleOverlay()
-        }
-    }
-
-    private func unregisterZ() {
-        zHotkey = nil
-    }
-
-    private func toggleOverlay() {
-        guard case .dragging(let target, let shown) = state else { return }
         if shown {
             overlay.dismiss()
             state = .dragging(target: target, overlayShown: false)

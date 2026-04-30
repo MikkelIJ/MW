@@ -7,6 +7,7 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var recorder: HotkeyRecorderField?
     private var instantRecorders: [HotkeyRecorderField] = []
+    private var gridBridge: GridBridge?
     private let onChange: (KeyCombo) -> Void
     private let onInstantChange: ([KeyCombo?]) -> Void
 
@@ -23,6 +24,7 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
                 r.combo = (i < instants.count ? instants[i] : nil)
                     ?? KeyCombo(keyCode: 0, modifiers: 0)
             }
+            gridBridge?.refresh()
             w.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -34,9 +36,10 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
         let bottomPad: CGFloat = 20
         let mainBlockH: CGFloat = 80
         let instantHeader: CGFloat = 28
+        let gridBlockH: CGFloat = 70
         let hintH: CGFloat = 36
         let contentH = topPad + mainBlockH + instantHeader
-            + CGFloat(slotCount) * rowH + 8 + hintH + bottomPad
+            + CGFloat(slotCount) * rowH + 8 + gridBlockH + hintH + bottomPad
         let contentW: CGFloat = 420
 
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: contentW, height: contentH),
@@ -112,6 +115,62 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
             content.addSubview(clear)
         }
 
+        // Editor grid size
+        y -= 8
+        let gridHeader = NSTextField(labelWithString: "Editor Grid Size (snap-to-grid)")
+        gridHeader.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        gridHeader.frame = NSRect(x: 20, y: y - 18, width: contentW - 40, height: 18)
+        content.addSubview(gridHeader)
+        y -= 18 + 8
+
+        let colsLabel = NSTextField(labelWithString: "Columns")
+        colsLabel.font = NSFont.systemFont(ofSize: 12)
+        colsLabel.textColor = .secondaryLabelColor
+        colsLabel.frame = NSRect(x: 20, y: y - 22, width: 70, height: 18)
+        content.addSubview(colsLabel)
+
+        let colsField = NSTextField(frame: NSRect(x: 95, y: y - 26, width: 50, height: 22))
+        colsField.alignment = .right
+        colsField.integerValue = GridSettings.columns
+        content.addSubview(colsField)
+
+        let colsStepper = NSStepper(frame: NSRect(x: 150, y: y - 28, width: 20, height: 28))
+        colsStepper.minValue = Double(GridSettings.minSize)
+        colsStepper.maxValue = Double(GridSettings.maxSize)
+        colsStepper.integerValue = GridSettings.columns
+        content.addSubview(colsStepper)
+
+        let rowsLabel = NSTextField(labelWithString: "Rows")
+        rowsLabel.font = NSFont.systemFont(ofSize: 12)
+        rowsLabel.textColor = .secondaryLabelColor
+        rowsLabel.frame = NSRect(x: 200, y: y - 22, width: 50, height: 18)
+        content.addSubview(rowsLabel)
+
+        let rowsField = NSTextField(frame: NSRect(x: 245, y: y - 26, width: 50, height: 22))
+        rowsField.alignment = .right
+        rowsField.integerValue = GridSettings.rows
+        content.addSubview(rowsField)
+
+        let rowsStepper = NSStepper(frame: NSRect(x: 300, y: y - 28, width: 20, height: 28))
+        rowsStepper.minValue = Double(GridSettings.minSize)
+        rowsStepper.maxValue = Double(GridSettings.maxSize)
+        rowsStepper.integerValue = GridSettings.rows
+        content.addSubview(rowsStepper)
+
+        let gridReset = NSButton(title: "Reset", target: nil, action: nil)
+        gridReset.bezelStyle = .rounded
+        gridReset.frame = NSRect(x: 330, y: y - 28, width: 70, height: 28)
+        content.addSubview(gridReset)
+
+        // Wire stepper ↔ field ↔ persisted setting.
+        let bridge = GridBridge(colsField: colsField, colsStepper: colsStepper,
+                                rowsField: rowsField, rowsStepper: rowsStepper,
+                                resetButton: gridReset)
+        self.gridBridge = bridge
+        bridge.attach()
+
+        y -= 70
+
         // Hint
         y -= 8 + hintH
         let hint = NSTextField(labelWithString:
@@ -156,6 +215,77 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
         window = nil
         recorder = nil
         instantRecorders.removeAll()
+        gridBridge = nil
+    }
+}
+
+// MARK: - Grid size bridge
+
+/// Glues the columns/rows steppers + text fields to `GridSettings`,
+/// keeping them in sync and persisting changes.
+private final class GridBridge: NSObject, NSTextFieldDelegate {
+    private let colsField: NSTextField
+    private let colsStepper: NSStepper
+    private let rowsField: NSTextField
+    private let rowsStepper: NSStepper
+    private let resetButton: NSButton
+
+    init(colsField: NSTextField, colsStepper: NSStepper,
+         rowsField: NSTextField, rowsStepper: NSStepper,
+         resetButton: NSButton) {
+        self.colsField = colsField
+        self.colsStepper = colsStepper
+        self.rowsField = rowsField
+        self.rowsStepper = rowsStepper
+        self.resetButton = resetButton
+    }
+
+    func attach() {
+        colsField.delegate = self
+        rowsField.delegate = self
+        colsStepper.target = self
+        colsStepper.action = #selector(colsStepperChanged)
+        rowsStepper.target = self
+        rowsStepper.action = #selector(rowsStepperChanged)
+        resetButton.target = self
+        resetButton.action = #selector(resetGrid)
+    }
+
+    @objc private func colsStepperChanged() {
+        colsField.integerValue = colsStepper.integerValue
+        GridSettings.columns = colsStepper.integerValue
+    }
+    @objc private func rowsStepperChanged() {
+        rowsField.integerValue = rowsStepper.integerValue
+        GridSettings.rows = rowsStepper.integerValue
+    }
+    @objc private func resetGrid() {
+        colsField.integerValue   = GridSettings.defaultCols
+        colsStepper.integerValue = GridSettings.defaultCols
+        rowsField.integerValue   = GridSettings.defaultRows
+        rowsStepper.integerValue = GridSettings.defaultRows
+        GridSettings.columns = GridSettings.defaultCols
+        GridSettings.rows    = GridSettings.defaultRows
+    }
+
+    func refresh() {
+        colsField.integerValue   = GridSettings.columns
+        colsStepper.integerValue = GridSettings.columns
+        rowsField.integerValue   = GridSettings.rows
+        rowsStepper.integerValue = GridSettings.rows
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+        let value = max(GridSettings.minSize,
+                        min(GridSettings.maxSize, field.integerValue))
+        if field === colsField {
+            colsStepper.integerValue = value
+            GridSettings.columns = value
+        } else if field === rowsField {
+            rowsStepper.integerValue = value
+            GridSettings.rows = value
+        }
     }
 }
 

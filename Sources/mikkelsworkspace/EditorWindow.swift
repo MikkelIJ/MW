@@ -86,11 +86,12 @@ private final class EditorView: NSView {
     private let onCommit: () -> Void
     private let onCancel: () -> Void
 
-    // Snap-to-grid (toggle with G). 12 columns × 12 rows hits halves,
-    // thirds, quarters, sixths and twelfths — handy for symmetric layouts.
+    // Snap-to-grid (toggle with G). Grid dimensions come from
+    // Preferences; default 12×12 hits halves, thirds, quarters,
+    // sixths and twelfths cleanly.
     private var snapToGrid: Bool = true
-    private let gridCols: CGFloat = 12
-    private let gridRows: CGFloat = 12
+    private var gridCols: CGFloat = CGFloat(GridSettings.columns)
+    private var gridRows: CGFloat = CGFloat(GridSettings.rows)
 
     // Resize state.
     private struct EdgeMask: OptionSet {
@@ -227,7 +228,8 @@ private final class EditorView: NSView {
     private func drawHud() {
         let title = "Editing: \(display.label)"
         let snap  = snapToGrid ? "ON" : "off"
-        let hint  = "Drag empty space to add · Drag edges to resize · Click inside to remove · G: snap-to-grid (\(snap)) · Return saves all · Esc cancels"
+        let grid  = "\(Int(gridCols))×\(Int(gridRows))"
+        let hint  = "Drag empty space to add · Drag edges to resize · Click inside to remove · G: snap-to-grid (\(snap), \(grid)) · Return saves all · Esc cancels"
 
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
