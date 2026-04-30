@@ -3,9 +3,14 @@ import ApplicationServices
 import Carbon.HIToolbox
 
 /// Watches global mouse events. While the user is actively dragging a
-/// window (left mouse button held + window frame moved), a **right
-/// mouse click** toggles the snap-region overlay. Releasing the left
-/// mouse button over a region snaps the focused window into it.
+/// window (left mouse button held + window frame moved), the snap
+/// overlay can be summoned in two ways:
+///
+///   * **Right-click** (or two-finger tap on a trackpad) toggles it.
+///   * **Holding Control** shows it while the key is down.
+///
+/// Releasing the left mouse button over a region snaps the focused
+/// window into it.
 final class DragSnapMonitor {
     private let store: RegionStore
     private let overlay: OverlayWindowController
@@ -37,7 +42,8 @@ final class DragSnapMonitor {
     func start() {
         let mouseMask: NSEvent.EventTypeMask = [
             .leftMouseDown, .leftMouseUp, .leftMouseDragged,
-            .rightMouseDown,
+            .rightMouseDown, .otherMouseDown,
+            .flagsChanged,
         ]
         if mouseGlobalMonitor == nil {
             mouseGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseMask) { [weak self] e in
@@ -104,22 +110,36 @@ final class DragSnapMonitor {
             }
             state = .idle
 
-        case .rightMouseDown:
+        case .rightMouseDown, .otherMouseDown:
             // Toggle the snap overlay only while a window drag is in
-            // progress. Right-click is left untouched at all other
-            // times so context menus etc. work normally.
+            // progress. Right-click / middle-click (two- or three-finger
+            // tap on a trackpad) is left untouched at all other times so
+            // context menus etc. work normally.
             guard case .dragging(let target, let shown) = state else { return }
-            if shown {
-                overlay.dismiss()
-                state = .dragging(target: target, overlayShown: false)
-            } else {
-                overlay.presentForDrag()
-                overlay.updateDragCursor(NSEvent.mouseLocation)
-                state = .dragging(target: target, overlayShown: true)
+            setOverlay(shown: !shown, target: target)
+
+        case .flagsChanged:
+            // Trackpad-friendly trigger: hold Control while dragging to
+            // show the overlay; release it to hide. Works even when the
+            // user has no secondary-click configured.
+            guard case .dragging(let target, let shown) = state else { return }
+            let wantShown = event.modifierFlags.contains(.control)
+            if wantShown != shown {
+                setOverlay(shown: wantShown, target: target)
             }
 
         default:
             break
         }
+    }
+
+    private func setOverlay(shown: Bool, target: AXUIElement?) {
+        if shown {
+            overlay.presentForDrag()
+            overlay.updateDragCursor(NSEvent.mouseLocation)
+        } else {
+            overlay.dismiss()
+        }
+        state = .dragging(target: target, overlayShown: shown)
     }
 }
