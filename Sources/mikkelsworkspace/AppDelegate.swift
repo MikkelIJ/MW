@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var instantHotkeys: [Hotkey?] = Array(repeating: nil, count: InstantSnapStore.slotCount)
     private var instantCombos: [KeyCombo?] = Array(repeating: nil, count: InstantSnapStore.slotCount)
     private var prefs: PreferencesWindowController?
+    private var dragSnap: DragSnapMonitor?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         ensureAccessibilityPermission()
@@ -22,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         registerHotkey()
         registerInstantHotkeys()
+        setupDragSnap()
 
         // Rebuild the menu (and dismiss any in-flight overlays) when
         // displays come and go so each monitor's profile is picked up.
@@ -352,6 +354,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSWorkspace.shared.open(url)
             }
         }
+    }
+
+    // MARK: - Drag-snap
+    private func setupDragSnap() {
+        if overlay == nil { overlay = OverlayWindowController(store: store) }
+        let monitor = DragSnapMonitor(store: store, overlay: overlay!)
+        monitor.start()
+        dragSnap = monitor
     }
 
     // MARK: - Accessibility prompt

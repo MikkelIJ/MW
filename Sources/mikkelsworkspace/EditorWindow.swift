@@ -280,14 +280,89 @@ final class OverlayWindowController {
         windows.removeAll()
         views.removeAll()
     }
+
+    // MARK: - Drag-snap mode
+    //
+    // Like `present(targetWindow:onPick:)`, but the overlay windows are
+    // mouse-transparent so the user can keep dragging the underlying
+    // window. Hover and drop are driven externally by `DragSnapMonitor`
+    // via `updateDragCursor(_:)` and `dropTarget(at:)`.
+    func presentForDrag() {
+        dismiss()
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+        store.refreshLabels(from: screens)
+
+        var any = false
+        for screen in screens {
+            let id = screen.snapDisplayID
+            let regions = store.regions(for: id)
+            if !regions.isEmpty { any = true }
+
+            let frame = screen.visibleFrame
+            let win = NSWindow(contentRect: NSRect(origin: .zero, size: frame.size),
+                               styleMask: .borderless,
+                               backing: .buffered, defer: false)
+            win.level = .mainMenu + 1
+            win.isOpaque = false
+            win.backgroundColor = .clear
+            win.ignoresMouseEvents = true
+            win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            win.hasShadow = false
+            win.setFrame(frame, display: false)
+
+            let view = OverlayView(
+                frame: NSRect(origin: .zero, size: frame.size),
+                regions: regions,
+                screenFrame: frame,
+                displayLabel: id.label,
+                hasAnyRegion: !regions.isEmpty,
+                interactive: false
+            )
+            win.contentView = view
+            win.setFrame(frame, display: true)
+            win.orderFrontRegardless()
+
+            windows.append(win)
+            views.append(view)
+        }
+
+        if !any { dismiss() }
+    }
+
+    /// Update region highlight to follow the cursor at `screenPoint`
+    /// (global Cocoa coordinates, e.g. from `NSEvent.mouseLocation`).
+    func updateDragCursor(_ screenPoint: NSPoint) {
+        for view in views {
+            guard view.screenFrame.contains(screenPoint) else {
+                view.setExternalHover(localPoint: nil)
+                continue
+            }
+            let local = NSPoint(x: screenPoint.x - view.screenFrame.origin.x,
+                                y: screenPoint.y - view.screenFrame.origin.y)
+            view.setExternalHover(localPoint: local)
+        }
+    }
+
+    /// Returns the global frame of the region under `screenPoint`, or nil
+    /// if the cursor isn't over a region.
+    func dropTarget(at screenPoint: NSPoint) -> NSRect? {
+        for view in views where view.screenFrame.contains(screenPoint) {
+            let local = NSPoint(x: screenPoint.x - view.screenFrame.origin.x,
+                                y: screenPoint.y - view.screenFrame.origin.y)
+            if let r = view.regionRect(atLocal: local) { return r }
+        }
+        return nil
+    }
 }
 
-private final class OverlayView: NSView {
-    private let regions: [Region]
-    private let screenFrame: NSRect
+fileprivate final class OverlayView: NSView {
+    fileprivate let regions: [Region]
+    fileprivate let screenFrame: NSRect
     private let displayLabel: String
     private let hasAnyRegion: Bool
-    private let onPick: (NSRect?) -> Void
+    private let onPick: ((NSRect?) -> Void)?
+    private let interactive: Bool
     private var hover: Int? = nil
     private var trackingArea: NSTrackingArea?
 
@@ -296,27 +371,49 @@ private final class OverlayView: NSView {
          screenFrame: NSRect,
          displayLabel: String,
          hasAnyRegion: Bool,
-         onPick: @escaping (NSRect?) -> Void) {
+         interactive: Bool = true,
+         onPick: ((NSRect?) -> Void)? = nil) {
         self.regions = regions
         self.screenFrame = screenFrame
         self.displayLabel = displayLabel
         self.hasAnyRegion = hasAnyRegion
+        self.interactive = interactive
         self.onPick = onPick
         super.init(frame: frame)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    override var acceptsFirstResponder: Bool { true }
-    override func becomeFirstResponder() -> Bool { true }
+    override var acceptsFirstResponder: Bool { interactive }
+    override func becomeFirstResponder() -> Bool { interactive }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
+        guard interactive else { return }
         if let t = trackingArea { removeTrackingArea(t) }
         let t = NSTrackingArea(rect: bounds,
                                options: [.mouseMoved, .activeAlways, .inVisibleRect],
                                owner: self, userInfo: nil)
         addTrackingArea(t)
         trackingArea = t
+    }
+
+    /// Local-coordinate hit test. Used by drag mode (passes points
+    /// translated from a global mouse position).
+    fileprivate func regionRect(atLocal p: NSPoint) -> NSRect? {
+        guard let idx = regions.indices.last(where: { localRect(for: regions[$0]).contains(p) })
+        else { return nil }
+        return regions[idx].rect(in: screenFrame)
+    }
+
+    /// Drive hover externally (the window is mouse-transparent in drag mode).
+    fileprivate func setExternalHover(localPoint p: NSPoint?) {
+        let newHover: Int?
+        if let p {
+            newHover = regions.indices.last { localRect(for: regions[$0]).contains(p) }
+        } else {
+            newHover = nil
+        }
+        if newHover != hover { hover = newHover; needsDisplay = true }
     }
 
     private func localRect(for r: Region) -> NSRect {
@@ -362,22 +459,25 @@ private final class OverlayView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard interactive else { return }
         let p = convert(event.locationInWindow, from: nil)
         let newHover = regions.indices.last { localRect(for: regions[$0]).contains(p) }
         if newHover != hover { hover = newHover; needsDisplay = true }
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard interactive else { return }
         let p = convert(event.locationInWindow, from: nil)
         if let idx = regions.indices.last(where: { localRect(for: regions[$0]).contains(p) }) {
-            onPick(regions[idx].rect(in: screenFrame))
+            onPick?(regions[idx].rect(in: screenFrame))
         } else {
-            onPick(nil)
+            onPick?(nil)
         }
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { onPick(nil) } // Esc
+        guard interactive else { super.keyDown(with: event); return }
+        if event.keyCode == 53 { onPick?(nil) } // Esc
         else { super.keyDown(with: event) }
     }
 }
