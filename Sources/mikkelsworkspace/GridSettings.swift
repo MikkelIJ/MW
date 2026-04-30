@@ -6,10 +6,10 @@ enum GridSettings {
     private static let colsKey = "GridColumns"
     private static let rowsKey = "GridRows"
 
-    static let defaultCols: Int = 12
-    static let defaultRows: Int = 12
+    static let defaultCols: Int = 48
+    static let defaultRows: Int = 48
     static let minSize: Int = 1
-    static let maxSize: Int = 64
+    static let maxSize: Int = 128
 
     static var columns: Int {
         get {
