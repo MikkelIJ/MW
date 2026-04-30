@@ -9,6 +9,23 @@ A tiny menu-bar / system-tray app for snapping windows into custom-drawn regions
 
 ## Install — macOS
 
+### Homebrew (recommended)
+
+```sh
+brew install --cask MikkelIJ/mw/mw
+```
+
+If Homebrew can't find the tap automatically, add it once:
+
+```sh
+brew tap MikkelIJ/mw https://github.com/MikkelIJ/MW.git
+brew install --cask mw
+```
+
+Update with `brew upgrade --cask mw`. Uninstall with `brew uninstall --cask mw`.
+
+### One-liner script (no Homebrew)
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/MikkelIJ/MW/main/install.sh | bash
 ```
