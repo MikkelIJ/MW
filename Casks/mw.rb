@@ -12,6 +12,10 @@ cask "mw" do
   app "MW.app"
 
   postflight do
+    # Ad-hoc signed: strip quarantine so Gatekeeper allows launch.
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/MW.app"],
+                   sudo: false
     # Ad-hoc signature changes per build invalidate the prior TCC grant.
     system_command "/usr/bin/tccutil",
                    args: ["reset", "Accessibility", "local.mikkelsworkspace"],
