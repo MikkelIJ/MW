@@ -8,13 +8,20 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
     private var recorder: HotkeyRecorderField?
     private var instantRecorders: [HotkeyRecorderField] = []
     private var gridBridge: GridBridge?
+    private var profilesContainer: NSView?
+    private let store: RegionStore
     private let onChange: (KeyCombo) -> Void
     private let onInstantChange: ([KeyCombo?]) -> Void
+    private let onProfilesChanged: () -> Void
 
-    init(onChange: @escaping (KeyCombo) -> Void,
-         onInstantChange: @escaping ([KeyCombo?]) -> Void) {
+    init(store: RegionStore,
+         onChange: @escaping (KeyCombo) -> Void,
+         onInstantChange: @escaping ([KeyCombo?]) -> Void,
+         onProfilesChanged: @escaping () -> Void) {
+        self.store = store
         self.onChange = onChange
         self.onInstantChange = onInstantChange
+        self.onProfilesChanged = onProfilesChanged
     }
 
     func show(current: KeyCombo, instants: [KeyCombo?]) {
@@ -25,6 +32,7 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
                     ?? KeyCombo(keyCode: 0, modifiers: 0)
             }
             gridBridge?.refresh()
+            rebuildProfilesSection()
             w.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -37,10 +45,12 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
         let mainBlockH: CGFloat = 80
         let instantHeader: CGFloat = 28
         let gridBlockH: CGFloat = 70
+        let profilesBlockH: CGFloat = 230
         let hintH: CGFloat = 36
         let contentH = topPad + mainBlockH + instantHeader
-            + CGFloat(slotCount) * rowH + 8 + gridBlockH + hintH + bottomPad
-        let contentW: CGFloat = 420
+            + CGFloat(slotCount) * rowH + 8 + gridBlockH
+            + profilesBlockH + hintH + bottomPad
+        let contentW: CGFloat = 480
 
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: contentW, height: contentH),
                          styleMask: [.titled, .closable],
@@ -171,6 +181,30 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
 
         y -= 70
 
+        // Display Profiles section
+        let profilesHeader = NSTextField(labelWithString: "Display Profiles")
+        profilesHeader.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        profilesHeader.frame = NSRect(x: 20, y: y - 18, width: contentW - 40, height: 18)
+        content.addSubview(profilesHeader)
+        y -= 18 + 6
+
+        let profilesScroll = NSScrollView(
+            frame: NSRect(x: 20, y: y - (profilesBlockH - 24),
+                          width: contentW - 40, height: profilesBlockH - 24))
+        profilesScroll.hasVerticalScroller = true
+        profilesScroll.autohidesScrollers = true
+        profilesScroll.borderType = .bezelBorder
+        profilesScroll.drawsBackground = true
+        let docView = NSView(frame: NSRect(x: 0, y: 0,
+                                           width: profilesScroll.contentSize.width,
+                                           height: profilesScroll.contentSize.height))
+        docView.autoresizingMask = [.width]
+        profilesScroll.documentView = docView
+        content.addSubview(profilesScroll)
+        self.profilesContainer = docView
+        rebuildProfilesSection()
+        y -= (profilesBlockH - 24)
+
         // Hint
         y -= 8 + hintH
         let hint = NSTextField(labelWithString:
@@ -211,11 +245,176 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
         onInstantChange(current)
     }
 
+    // MARK: - Display Profiles
+
+    private func rebuildProfilesSection() {
+        guard let container = profilesContainer else { return }
+        container.subviews.forEach { $0.removeFromSuperview() }
+
+        let profiles = store.allKnownDisplays
+        let connectedKeys = Set(NSScreen.screens.map { $0.snapDisplayID.key })
+
+        let rowH: CGFloat = 70
+        let pad: CGFloat = 10
+        let contentWidth = container.bounds.width
+
+        if profiles.isEmpty {
+            let empty = NSTextField(labelWithString:
+                "No saved display profiles yet. Add regions from “Edit Regions for All Displays…”.")
+            empty.font = NSFont.systemFont(ofSize: 11)
+            empty.textColor = .secondaryLabelColor
+            empty.alignment = .center
+            empty.frame = NSRect(x: pad, y: 0, width: contentWidth - 2 * pad, height: 40)
+            empty.autoresizingMask = [.width]
+            container.frame = NSRect(x: 0, y: 0, width: contentWidth, height: 40)
+            container.addSubview(empty)
+            return
+        }
+
+        let totalH = CGFloat(profiles.count) * rowH
+        container.frame = NSRect(x: 0, y: 0, width: contentWidth, height: max(totalH, 40))
+
+        for (i, d) in profiles.enumerated() {
+            let yTop = container.bounds.height - CGFloat(i + 1) * rowH
+            let row = NSView(frame: NSRect(x: 0, y: yTop, width: contentWidth, height: rowH))
+            row.autoresizingMask = [.width]
+
+            // Subtle separator above (except first row)
+            if i > 0 {
+                let sep = NSBox(frame: NSRect(x: pad, y: rowH - 1,
+                                              width: contentWidth - 2 * pad, height: 1))
+                sep.boxType = .separator
+                sep.autoresizingMask = [.width]
+                row.addSubview(sep)
+            }
+
+            // Preview thumbnail
+            let aspect = aspectRatio(forKey: d.key)
+            let previewH: CGFloat = 50
+            let previewW: CGFloat = min(90, max(50, previewH * aspect))
+            let preview = RegionPreviewView(frame: NSRect(
+                x: pad, y: (rowH - previewH) / 2,
+                width: previewW, height: previewH))
+            preview.regions = store.regions(for: DisplayID(key: d.key, label: d.label))
+            row.addSubview(preview)
+
+            // Name + status
+            let nameX = pad + previewW + 12
+            let isConnected = connectedKeys.contains(d.key)
+            let name = NSTextField(labelWithString: d.label)
+            name.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+            name.frame = NSRect(x: nameX, y: rowH / 2 + 2,
+                                width: contentWidth - nameX - 100, height: 18)
+            name.autoresizingMask = [.width]
+            row.addSubview(name)
+
+            let statusText = isConnected ? "Connected" : "Offline"
+            let countText = "\(d.regionCount) region\(d.regionCount == 1 ? "" : "s")"
+            let sub = NSTextField(labelWithString: "\(statusText) · \(countText)")
+            sub.font = NSFont.systemFont(ofSize: 11)
+            sub.textColor = .secondaryLabelColor
+            sub.frame = NSRect(x: nameX, y: rowH / 2 - 18,
+                               width: contentWidth - nameX - 100, height: 16)
+            sub.autoresizingMask = [.width]
+            row.addSubview(sub)
+
+            // Delete button
+            let trashImage = NSImage(systemSymbolName: "trash",
+                                     accessibilityDescription: "Delete profile")
+            let delete = NSButton(title: "Delete", image: trashImage ?? NSImage(),
+                                  target: self, action: #selector(deleteProfile(_:)))
+            delete.imagePosition = trashImage == nil ? .noImage : .imageLeading
+            delete.bezelStyle = .rounded
+            delete.contentTintColor = .systemRed
+            delete.toolTip = "Delete this display profile and its saved regions"
+            delete.frame = NSRect(x: contentWidth - 90 - pad,
+                                  y: (rowH - 28) / 2, width: 90, height: 28)
+            delete.autoresizingMask = [.minXMargin]
+            delete.identifier = NSUserInterfaceItemIdentifier(d.key)
+            row.addSubview(delete)
+
+            container.addSubview(row)
+        }
+    }
+
+    private func aspectRatio(forKey key: String) -> CGFloat {
+        if let s = NSScreen.screens.first(where: { $0.snapDisplayID.key == key }) {
+            let f = s.frame
+            if f.height > 0 { return f.width / f.height }
+        }
+        return 16.0 / 10.0
+    }
+
+    @objc private func deleteProfile(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue else { return }
+        let label = store.allKnownDisplays.first { $0.key == key }?.label ?? "this display"
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete profile for “\(label)”?"
+        alert.informativeText = "All saved regions for this display will be removed. This cannot be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        store.setRegions([], for: DisplayID(key: key, label: ""))
+        rebuildProfilesSection()
+        onProfilesChanged()
+    }
+
     func windowWillClose(_ notification: Notification) {
         window = nil
         recorder = nil
         instantRecorders.removeAll()
         gridBridge = nil
+        profilesContainer = nil
+    }
+}
+
+// MARK: - Region preview
+
+/// Tiny thumbnail of a display profile's regions, drawn inside its bounds.
+final class RegionPreviewView: NSView {
+    var regions: [Region] = [] { didSet { needsDisplay = true } }
+
+    override var wantsUpdateLayer: Bool { false }
+
+    override func draw(_ dirty: NSRect) {
+        let bg = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                              xRadius: 3, yRadius: 3)
+        NSColor.windowBackgroundColor.setFill()
+        bg.fill()
+        NSColor.separatorColor.setStroke()
+        bg.lineWidth = 1
+        bg.stroke()
+
+        guard !regions.isEmpty else {
+            // "Empty" placeholder: faint dashes
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 10),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
+            let s = NSAttributedString(string: "empty", attributes: attrs)
+            let size = s.size()
+            s.draw(at: NSPoint(x: (bounds.width - size.width) / 2,
+                               y: (bounds.height - size.height) / 2))
+            return
+        }
+
+        let fill = NSColor.controlAccentColor.withAlphaComponent(0.30)
+        let stroke = NSColor.controlAccentColor.withAlphaComponent(0.85)
+        for r in regions {
+            // Region uses top-down y; convert to AppKit bottom-up.
+            let rx = bounds.minX + r.x * bounds.width
+            let rw = r.w * bounds.width
+            let rh = r.h * bounds.height
+            let ry = bounds.maxY - r.y * bounds.height - rh
+            let rect = NSRect(x: rx, y: ry, width: rw, height: rh).insetBy(dx: 1, dy: 1)
+            let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
+            fill.setFill()
+            path.fill()
+            stroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
     }
 }
 

@@ -61,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
+
+        // Primary actions
         let snapTitle = currentCombo.isEmpty
             ? "Snap to Region"
             : "Snap to Region   \(currentCombo.display)"
@@ -68,12 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                      action: #selector(showOverlay), keyEquivalent: "")
         menu.addItem(withTitle: "Edit Regions for All Displays…",
                      action: #selector(editRegions), keyEquivalent: "")
-        menu.addItem(withTitle: "Preferences…",
-                     action: #selector(showPreferences), keyEquivalent: ",")
-        menu.addItem(withTitle: "About MW",
-                     action: #selector(showAbout), keyEquivalent: "")
-        menu.addItem(withTitle: "Check for Updates…",
-                     action: #selector(checkForUpdates), keyEquivalent: "")
 
         // Connected displays
         menu.addItem(.separator())
@@ -91,26 +87,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
 
-        // Saved profiles for displays that aren't currently connected
-        let connectedKeys = Set(NSScreen.screens.map { $0.snapDisplayID.key })
-        let offline = store.allKnownDisplays.filter { !connectedKeys.contains($0.key) }
-        if !offline.isEmpty {
-            menu.addItem(.separator())
-            let header = NSMenuItem(title: "Saved Profiles (offline)",
-                                    action: nil, keyEquivalent: "")
-            header.isEnabled = false
-            menu.addItem(header)
-            for d in offline {
-                let item = NSMenuItem(
-                    title: "  \(d.label) — \(d.regionCount) region\(d.regionCount == 1 ? "" : "s")",
-                    action: #selector(forgetProfile(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = d.key
-                item.toolTip = "Click to forget this saved profile"
-                menu.addItem(item)
-            }
-        }
+        // Preferences
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Preferences…",
+                     action: #selector(showPreferences), keyEquivalent: ",")
 
+        // App info
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "About MW",
+                     action: #selector(showAbout), keyEquivalent: "")
+        menu.addItem(withTitle: "Check for Updates…",
+                     action: #selector(checkForUpdates), keyEquivalent: "")
+
+        // Diagnostics
         menu.addItem(.separator())
         let debugItem = NSMenuItem(title: "Debug Logging",
                                    action: #selector(toggleDebugLogging),
@@ -118,8 +107,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugItem.state = DebugLog.shared.enabled ? .on : .off
         menu.addItem(debugItem)
 
+        // Quit
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit",
+        let quit = NSMenuItem(title: "Quit MW",
                               action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
         quit.target = NSApp
@@ -129,19 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
         }
         statusItem.menu = menu
-    }
-
-    @objc private func forgetProfile(_ sender: NSMenuItem) {
-        guard let key = sender.representedObject as? String else { return }
-        let alert = NSAlert()
-        alert.messageText = "Forget profile for “\(sender.title.trimmingCharacters(in: .whitespaces))”?"
-        alert.informativeText = "Saved regions for this display will be deleted."
-        alert.addButton(withTitle: "Forget")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        // Use a synthetic DisplayID to clear it.
-        store.setRegions([], for: DisplayID(key: key, label: ""))
-        buildMenu()
     }
 
     @objc private func toggleDebugLogging() {
@@ -227,11 +204,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
                 .foregroundColor: NSColor.labelColor,
             ])
-        NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "MW",
-            .applicationVersion: "Mikkel’s Workspace",
+        let info = Bundle.main.infoDictionary
+        let shortVersion = (info?["CFBundleShortVersionString"] as? String) ?? UpdateChecker.currentVersion
+        let build = (info?["CFBundleVersion"] as? String) ?? ""
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .applicationName: "MW — Mikkel’s Workspace",
+            .applicationVersion: shortVersion,
             .credits: credits,
-        ])
+        ]
+        if !build.isEmpty, build != shortVersion {
+            options[.version] = build
+        }
+        NSApp.orderFrontStandardAboutPanel(options: options)
     }
 
     @objc private func checkForUpdates() {
@@ -289,6 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showPreferences() {
         if prefs == nil {
             prefs = PreferencesWindowController(
+                store: store,
                 onChange: { [weak self] combo in
                     guard let self else { return }
                     self.currentCombo = combo
@@ -300,6 +285,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.instantCombos = combos
                     InstantSnapStore.save(combos)
                     self.registerInstantHotkeys()
+                },
+                onProfilesChanged: { [weak self] in
+                    self?.buildMenu()
                 })
         }
         prefs?.show(current: currentCombo, instants: instantCombos)
