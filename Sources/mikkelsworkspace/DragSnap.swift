@@ -108,8 +108,7 @@ final class DragSnapMonitor {
                     return
                 }
                 DebugLog.shared.log("  drag CONFIRMED: dist=\(Int(dist)) frame moved \(fmt(initial))→\(fmt(now))")
-                state = .dragging(target: win, overlayShown: false,
-                                  lastMove: Date(), lastPoint: p)
+                state = .dragging(target: win, overlayShown: false,                setOverlay(shown: true, target: win)                                  lastMove: Date(), lastPoint: p)
                 scheduleDwellCheck()
             case .dragging(let target, let shown, _, let lastPoint):
                 let movement = hypot(p.x - lastPoint.x, p.y - lastPoint.y)
