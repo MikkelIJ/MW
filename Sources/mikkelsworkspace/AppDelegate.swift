@@ -117,11 +117,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    keyEquivalent: "")
         debugItem.state = DebugLog.shared.enabled ? .on : .off
         menu.addItem(debugItem)
-        if DebugLog.shared.enabled {
-            menu.addItem(withTitle: "Reveal Debug Log",
-                         action: #selector(revealDebugLog),
-                         keyEquivalent: "")
-        }
 
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit",
@@ -152,11 +147,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleDebugLogging() {
         DebugLog.shared.enabled.toggle()
         DebugLog.shared.log("--- debug logging \(DebugLog.shared.enabled ? "ENABLED" : "DISABLED") ---")
+        if DebugLog.shared.enabled {
+            openLogTailInTerminal()
+        }
         buildMenu()
     }
 
-    @objc private func revealDebugLog() {
-        NSWorkspace.shared.activateFileViewerSelecting([DebugLog.shared.logFileURL])
+    /// Opens Terminal.app with `tail -F` on the debug log so the user
+    /// can watch events stream live.
+    private func openLogTailInTerminal() {
+        let path = DebugLog.shared.logFileURL.path
+        // Quote the path safely for the shell.
+        let quoted = "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let script = "tell application \"Terminal\"\n" +
+            "    activate\n" +
+            "    do script \"clear; echo 'MW debug log — " + path + "'; tail -F " + quoted + "\"\n" +
+            "end tell"
+        if let appleScript = NSAppleScript(source: script) {
+            var err: NSDictionary?
+            appleScript.executeAndReturnError(&err)
+            if let err {
+                NSLog("openLogTailInTerminal failed: \(err)")
+            }
+        }
     }
 
     // MARK: - Hotkey
