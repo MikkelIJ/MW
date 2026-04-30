@@ -154,22 +154,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Opens Terminal.app with `tail -F` on the debug log so the user
-    /// can watch events stream live.
+    /// can watch events stream live. Uses a temp `.command` file +
+    /// `open -a Terminal` so it works without requiring AppleEvents
+    /// automation permission.
     private func openLogTailInTerminal() {
-        let path = DebugLog.shared.logFileURL.path
-        // Quote the path safely for the shell.
-        let quoted = "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let script = "tell application \"Terminal\"\n" +
-            "    activate\n" +
-            "    do script \"clear; echo 'MW debug log — " + path + "'; tail -F " + quoted + "\"\n" +
-            "end tell"
-        if let appleScript = NSAppleScript(source: script) {
-            var err: NSDictionary?
-            appleScript.executeAndReturnError(&err)
-            if let err {
-                NSLog("openLogTailInTerminal failed: \(err)")
-            }
+        let logPath = DebugLog.shared.logFileURL.path
+        let scriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mw-debug-tail.command")
+        let script = """
+        #!/bin/bash
+        clear
+        echo "MW debug log — \(logPath)"
+        echo "(Close this window or Ctrl-C to stop watching.)"
+        echo
+        # Make sure the log exists so tail doesn't error.
+        : > "\(logPath)" 2>/dev/null || touch "\(logPath)"
+        exec tail -F "\(logPath)"
+        """
+        do {
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755],
+                                                  ofItemAtPath: scriptURL.path)
+        } catch {
+            NSLog("openLogTailInTerminal: failed to write script: \(error)")
+            return
         }
+        NSWorkspace.shared.open(
+            [scriptURL],
+            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+            configuration: NSWorkspace.OpenConfiguration(),
+            completionHandler: { _, error in
+                if let error {
+                    NSLog("openLogTailInTerminal: Terminal launch failed: \(error)")
+                }
+            })
     }
 
     // MARK: - Hotkey
