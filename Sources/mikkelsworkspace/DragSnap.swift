@@ -22,8 +22,10 @@ final class DragSnapMonitor {
 
     private enum State {
         case idle
-        case mouseDown(NSPoint)                       // pressed but no drag yet
-        case dragging(target: AXUIElement?,           // moved past threshold
+        case mouseDown(start: NSPoint,
+                       window: AXUIElement?,
+                       initialFrame: NSRect?)        // pressed but not yet a confirmed window drag
+        case dragging(target: AXUIElement?,           // confirmed window drag
                       overlayShown: Bool)
     }
     private var state: State = .idle
@@ -68,17 +70,30 @@ final class DragSnapMonitor {
     private func handle(_ event: NSEvent) {
         switch event.type {
         case .leftMouseDown:
-            state = .mouseDown(NSEvent.mouseLocation)
+            // Capture the focused window + its current frame at the
+            // moment of mouse-down. We'll use the frame later to
+            // distinguish a *window* drag (titlebar move) from any
+            // other drag (text selection, draw tools, etc.).
+            let win = WindowMover.focusedWindow()
+            let frame = win.flatMap { WindowMover.frame(of: $0) }
+            state = .mouseDown(start: NSEvent.mouseLocation,
+                               window: win,
+                               initialFrame: frame)
 
         case .leftMouseDragged:
             switch state {
-            case .mouseDown(let start):
+            case .mouseDown(let start, let win, let initial):
                 let p = NSEvent.mouseLocation
-                if hypot(p.x - start.x, p.y - start.y) >= dragThreshold {
-                    let target = WindowMover.focusedWindow()
-                    state = .dragging(target: target, overlayShown: false)
-                    registerZ()
-                }
+                guard hypot(p.x - start.x, p.y - start.y) >= dragThreshold else { return }
+                // Only treat this as a window drag if the focused
+                // window's frame actually moved. Otherwise leave Z
+                // alone so it keeps working for normal typing.
+                guard let win, let initial,
+                      let now = WindowMover.frame(of: win),
+                      now.origin != initial.origin
+                else { return }
+                state = .dragging(target: win, overlayShown: false)
+                registerZ()
             case .dragging(_, let shown):
                 if shown { overlay.updateDragCursor(NSEvent.mouseLocation) }
             default:

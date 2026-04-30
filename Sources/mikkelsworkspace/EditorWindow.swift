@@ -86,6 +86,23 @@ private final class EditorView: NSView {
     private let onCommit: () -> Void
     private let onCancel: () -> Void
 
+    // Snap-to-grid (toggle with G). 12 columns × 12 rows hits halves,
+    // thirds, quarters, sixths and twelfths — handy for symmetric layouts.
+    private var snapToGrid: Bool = true
+    private let gridCols: CGFloat = 12
+    private let gridRows: CGFloat = 12
+
+    // Resize state.
+    private struct EdgeMask: OptionSet {
+        let rawValue: Int
+        static let left   = EdgeMask(rawValue: 1 << 0)
+        static let right  = EdgeMask(rawValue: 1 << 1)
+        static let top    = EdgeMask(rawValue: 1 << 2)
+        static let bottom = EdgeMask(rawValue: 1 << 3)
+    }
+    private var resizing: (index: Int, edges: EdgeMask, original: NSRect, anchor: NSPoint)?
+    private let edgeGrabSize: CGFloat = 8
+
     init(frame: NSRect, display: DisplayID, existing: [Region],
          onCommit: @escaping () -> Void,
          onCancel: @escaping () -> Void) {
@@ -108,18 +125,60 @@ private final class EditorView: NSView {
 
     func commitRegions() -> [Region] {
         working.map { r in
-            let yTop = bounds.height - (r.origin.y + r.height)
-            return Region(x: r.origin.x / bounds.width,
+            let snapped = snapToGrid ? snap(r) : r
+            let yTop = bounds.height - (snapped.origin.y + snapped.height)
+            return Region(x: snapped.origin.x / bounds.width,
                           y: yTop / bounds.height,
-                          w: r.width / bounds.width,
-                          h: r.height / bounds.height)
+                          w: snapped.width / bounds.width,
+                          h: snapped.height / bounds.height)
         }
+    }
+
+    // MARK: snap helpers
+    private func gridStep() -> NSSize {
+        NSSize(width: bounds.width / gridCols,
+               height: bounds.height / gridRows)
+    }
+
+    private func snap(_ value: CGFloat, step: CGFloat) -> CGFloat {
+        guard step > 0 else { return value }
+        return (value / step).rounded() * step
+    }
+
+    private func snap(_ rect: NSRect) -> NSRect {
+        let step = gridStep()
+        let x = snap(rect.origin.x, step: step.width)
+        let y = snap(rect.origin.y, step: step.height)
+        let maxX = snap(rect.maxX, step: step.width)
+        let maxY = snap(rect.maxY, step: step.height)
+        var r = NSRect(x: x, y: y,
+                       width: max(step.width, maxX - x),
+                       height: max(step.height, maxY - y))
+        // Clamp to bounds.
+        if r.maxX > bounds.width  { r.size.width  = bounds.width  - r.origin.x }
+        if r.maxY > bounds.height { r.size.height = bounds.height - r.origin.y }
+        if r.origin.x < 0 { r.origin.x = 0 }
+        if r.origin.y < 0 { r.origin.y = 0 }
+        return r
+    }
+
+    // MARK: hit testing
+    private func edges(at p: NSPoint, of rect: NSRect) -> EdgeMask {
+        guard rect.insetBy(dx: -edgeGrabSize, dy: -edgeGrabSize).contains(p) else { return [] }
+        var mask: EdgeMask = []
+        if abs(p.x - rect.minX) <= edgeGrabSize { mask.insert(.left) }
+        if abs(p.x - rect.maxX) <= edgeGrabSize { mask.insert(.right) }
+        if abs(p.y - rect.minY) <= edgeGrabSize { mask.insert(.bottom) }
+        if abs(p.y - rect.maxY) <= edgeGrabSize { mask.insert(.top) }
+        return mask
     }
 
     // MARK: drawing
     override func draw(_ dirty: NSRect) {
         NSColor.black.withAlphaComponent(0.35).setFill()
         bounds.fill()
+
+        if snapToGrid { drawGrid() }
 
         for rect in working {
             NSColor.systemBlue.withAlphaComponent(0.35).setFill()
@@ -131,8 +190,9 @@ private final class EditorView: NSView {
         }
 
         if let s = dragStart, let c = dragCurrent {
-            let r = NSRect(x: min(s.x, c.x), y: min(s.y, c.y),
+            var r = NSRect(x: min(s.x, c.x), y: min(s.y, c.y),
                            width: abs(c.x - s.x), height: abs(c.y - s.y))
+            if snapToGrid { r = snap(r) }
             NSColor.systemGreen.withAlphaComponent(0.35).setFill()
             r.fill()
             NSColor.systemGreen.setStroke()
@@ -144,9 +204,30 @@ private final class EditorView: NSView {
         drawHud()
     }
 
+    private func drawGrid() {
+        let step = gridStep()
+        NSColor.white.withAlphaComponent(0.08).setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 1
+        var x: CGFloat = step.width
+        while x < bounds.width {
+            path.move(to: NSPoint(x: x, y: 0))
+            path.line(to: NSPoint(x: x, y: bounds.height))
+            x += step.width
+        }
+        var y: CGFloat = step.height
+        while y < bounds.height {
+            path.move(to: NSPoint(x: 0, y: y))
+            path.line(to: NSPoint(x: bounds.width, y: y))
+            y += step.height
+        }
+        path.stroke()
+    }
+
     private func drawHud() {
         let title = "Editing: \(display.label)"
-        let hint  = "Drag to add · Click to remove · Return saves all · Esc cancels"
+        let snap  = snapToGrid ? "ON" : "off"
+        let hint  = "Drag empty space to add · Drag edges to resize · Click inside to remove · G: snap-to-grid (\(snap)) · Return saves all · Esc cancels"
 
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
@@ -178,6 +259,18 @@ private final class EditorView: NSView {
     // MARK: mouse
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+
+        // Resize hit-test runs first so users can grab the edge of an
+        // existing region without it being treated as a click-to-remove.
+        for idx in working.indices.reversed() {
+            let edges = edges(at: p, of: working[idx])
+            if !edges.isEmpty && !working[idx].insetBy(dx: edgeGrabSize, dy: edgeGrabSize).contains(p) {
+                resizing = (idx, edges, working[idx], p)
+                return
+            }
+        }
+
+        // Click inside an existing region → remove it.
         if let idx = working.lastIndex(where: { $0.contains(p) }) {
             working.remove(at: idx)
             needsDisplay = true
@@ -188,14 +281,45 @@ private final class EditorView: NSView {
         needsDisplay = true
     }
     override func mouseDragged(with event: NSEvent) {
-        dragCurrent = convert(event.locationInWindow, from: nil)
+        let p = convert(event.locationInWindow, from: nil)
+        if var r = resizing {
+            let dx = p.x - r.anchor.x
+            let dy = p.y - r.anchor.y
+            var new = r.original
+            if r.edges.contains(.left)  { new.origin.x   += dx; new.size.width  -= dx }
+            if r.edges.contains(.right) { new.size.width += dx }
+            if r.edges.contains(.bottom){ new.origin.y   += dy; new.size.height -= dy }
+            if r.edges.contains(.top)   { new.size.height += dy }
+            // Enforce a minimum size.
+            let minSize: CGFloat = 24
+            if new.size.width  < minSize { new.size.width  = minSize }
+            if new.size.height < minSize { new.size.height = minSize }
+            // Clamp to view bounds.
+            if new.origin.x < 0 { new.origin.x = 0 }
+            if new.origin.y < 0 { new.origin.y = 0 }
+            if new.maxX > bounds.width  { new.size.width  = bounds.width  - new.origin.x }
+            if new.maxY > bounds.height { new.size.height = bounds.height - new.origin.y }
+            working[r.index] = new
+            r.original = new // not necessary since we use r.original+delta from anchor
+            resizing = (r.index, r.edges, r.original, r.anchor)
+            needsDisplay = true
+            return
+        }
+        dragCurrent = p
         needsDisplay = true
     }
     override func mouseUp(with event: NSEvent) {
+        if let r = resizing {
+            if snapToGrid { working[r.index] = snap(working[r.index]) }
+            resizing = nil
+            needsDisplay = true
+            return
+        }
         defer { dragStart = nil; dragCurrent = nil; needsDisplay = true }
         guard let s = dragStart, let c = dragCurrent else { return }
-        let r = NSRect(x: min(s.x, c.x), y: min(s.y, c.y),
+        var r = NSRect(x: min(s.x, c.x), y: min(s.y, c.y),
                        width: abs(c.x - s.x), height: abs(c.y - s.y))
+        if snapToGrid { r = snap(r) }
         if r.width > 12 && r.height > 12 { working.append(r) }
     }
 
@@ -204,6 +328,10 @@ private final class EditorView: NSView {
         switch event.keyCode {
         case 53:        onCancel()           // Esc
         case 36, 76:    onCommit()           // Return / keypad enter
+        case 5:                              // G — toggle snap-to-grid
+            snapToGrid.toggle()
+            if snapToGrid { working = working.map { snap($0) } }
+            needsDisplay = true
         default:        super.keyDown(with: event)
         }
     }
