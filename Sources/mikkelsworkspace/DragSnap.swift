@@ -1,29 +1,17 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
-import CoreGraphics
 
 /// Watches global mouse events. While the user is actively dragging a
-/// window (left mouse button down + window frame moved), pressing **Z**
-/// toggles the snap-region overlay. Releasing the mouse over a region
-/// snaps the focused window into it.
-///
-/// Z is observed via a passive `CGEventTap` so the keystroke is never
-/// reserved for MW (you can keep typing "z" anywhere) and so it still
-/// fires while the OS is in window-drag tracking mode (where regular
-/// `NSEvent` global monitors don't deliver key events).
+/// window (left mouse button held + window frame moved), a **right
+/// mouse click** toggles the snap-region overlay. Releasing the left
+/// mouse button over a region snaps the focused window into it.
 final class DragSnapMonitor {
     private let store: RegionStore
     private let overlay: OverlayWindowController
 
     private var mouseGlobalMonitor: Any?
     private var mouseLocalMonitor: Any?
-
-    /// Low-level CGEventTap for keyDown. Set up once at start and left
-    /// running; the callback inspects `state` and only acts when a
-    /// window drag is in progress. Always returns the event unmodified.
-    private var keyTap: CFMachPort?
-    private var keyTapSource: CFRunLoopSource?
 
     /// Pixels the mouse must travel after mouse-down before we treat
     /// the gesture as a drag (rather than an incidental click).
@@ -49,6 +37,7 @@ final class DragSnapMonitor {
     func start() {
         let mouseMask: NSEvent.EventTypeMask = [
             .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+            .rightMouseDown,
         ]
         if mouseGlobalMonitor == nil {
             mouseGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseMask) { [weak self] e in
@@ -61,7 +50,6 @@ final class DragSnapMonitor {
                 return e
             }
         }
-        installKeyTap()
     }
 
     func stop() {
@@ -69,7 +57,6 @@ final class DragSnapMonitor {
             if let m { NSEvent.removeMonitor(m) }
         }
         mouseGlobalMonitor = nil; mouseLocalMonitor = nil
-        removeKeyTap()
         if case .dragging(_, let shown) = state, shown { overlay.dismiss() }
         state = .idle
     }
@@ -117,85 +104,22 @@ final class DragSnapMonitor {
             }
             state = .idle
 
+        case .rightMouseDown:
+            // Toggle the snap overlay only while a window drag is in
+            // progress. Right-click is left untouched at all other
+            // times so context menus etc. work normally.
+            guard case .dragging(let target, let shown) = state else { return }
+            if shown {
+                overlay.dismiss()
+                state = .dragging(target: target, overlayShown: false)
+            } else {
+                overlay.presentForDrag()
+                overlay.updateDragCursor(NSEvent.mouseLocation)
+                state = .dragging(target: target, overlayShown: true)
+            }
+
         default:
             break
-        }
-    }
-
-    // MARK: - Key tap (Z observer)
-
-    private func installKeyTap() {
-        guard keyTap == nil else { return }
-        let mask = (1 << CGEventType.keyDown.rawValue)
-        let refcon = Unmanaged.passUnretained(self).toOpaque()
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,           // never modify or swallow events
-            eventsOfInterest: CGEventMask(mask),
-            callback: { _, type, event, refcon in
-                guard let refcon else { return Unmanaged.passUnretained(event) }
-                let monitor = Unmanaged<DragSnapMonitor>.fromOpaque(refcon).takeUnretainedValue()
-                monitor.handleKeyTap(type: type, event: event)
-                // listenOnly taps can't modify the stream anyway, but be explicit.
-                return Unmanaged.passUnretained(event)
-            },
-            userInfo: refcon
-        ) else {
-            NSLog("mikkelsworkspace: failed to create CGEventTap (Accessibility not granted?)")
-            return
-        }
-        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        keyTap = tap
-        keyTapSource = src
-    }
-
-    private func removeKeyTap() {
-        if let src = keyTapSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
-        }
-        if let tap = keyTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-        keyTap = nil
-        keyTapSource = nil
-    }
-
-    private func handleKeyTap(type: CGEventType, event: CGEvent) {
-        // The kernel disables our tap if it ever times out / misbehaves.
-        // Re-enable it transparently so Z keeps working.
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap = keyTap { CGEvent.tapEnable(tap: tap, enable: true) }
-            return
-        }
-        guard type == .keyDown else { return }
-
-        // Only react to Z, no modifiers, and only while a window is
-        // actually being dragged. Hand off to the main thread because
-        // taps fire on a high-priority runloop.
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        guard keyCode == Int64(kVK_ANSI_Z) else { return }
-        let flags = event.flags
-        let consequential: CGEventFlags = [.maskCommand, .maskAlternate,
-                                           .maskControl, .maskShift]
-        guard flags.intersection(consequential).rawValue == 0 else { return }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.toggleOverlay()
-        }
-    }
-
-    private func toggleOverlay() {
-        guard case .dragging(let target, let shown) = state else { return }
-        if shown {
-            overlay.dismiss()
-            state = .dragging(target: target, overlayShown: false)
-        } else {
-            overlay.presentForDrag()
-            overlay.updateDragCursor(NSEvent.mouseLocation)
-            state = .dragging(target: target, overlayShown: true)
         }
     }
 }
