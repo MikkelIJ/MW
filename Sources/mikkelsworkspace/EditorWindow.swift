@@ -555,21 +555,57 @@ fileprivate final class OverlayView: NSView {
     }
 
     override func draw(_ dirty: NSRect) {
-        NSColor.black.withAlphaComponent(0.35).setFill()
-        bounds.fill()
-
-        for (i, r) in regions.enumerated() {
-            let rect = localRect(for: r)
-            let color: NSColor = (i == hover) ? .systemGreen : .systemBlue
-            color.withAlphaComponent(i == hover ? 0.45 : 0.30).setFill()
-            rect.fill()
-            color.setStroke()
-            let p = NSBezierPath(rect: rect.insetBy(dx: 1, dy: 1))
-            p.lineWidth = 2
-            p.stroke()
+        // Native-style overlay:
+        //   * Drag mode (non-interactive): no screen dim; regions appear
+        //     as soft white rounded rectangles, the hovered one bright
+        //     white with a subtle glow — mirroring macOS window-tiling.
+        //   * Interactive mode: dim background so the user can spot
+        //     every zone, but use the same rounded white rendering.
+        if interactive {
+            NSColor.black.withAlphaComponent(0.30).setFill()
+            bounds.fill()
         }
 
-        // Per-screen label
+        let radius: CGFloat = 12
+        let inset: CGFloat = 6
+
+        for (i, r) in regions.enumerated() {
+            let rect = localRect(for: r).insetBy(dx: inset, dy: inset)
+            let path = NSBezierPath(roundedRect: rect,
+                                    xRadius: radius, yRadius: radius)
+            let isHover = (i == hover)
+
+            if isHover {
+                // Soft outer glow.
+                NSGraphicsContext.saveGraphicsState()
+                let glow = NSShadow()
+                glow.shadowColor = NSColor.white.withAlphaComponent(0.55)
+                glow.shadowBlurRadius = 24
+                glow.shadowOffset = .zero
+                glow.set()
+                NSColor.white.withAlphaComponent(0.001).setFill()
+                path.fill()
+                NSGraphicsContext.restoreGraphicsState()
+
+                NSColor.white.withAlphaComponent(0.55).setFill()
+                path.fill()
+                NSColor.white.withAlphaComponent(0.95).setStroke()
+                path.lineWidth = 2.5
+                path.stroke()
+            } else {
+                let baseFill: CGFloat = interactive ? 0.18 : 0.12
+                let baseStroke: CGFloat = interactive ? 0.55 : 0.40
+                NSColor.white.withAlphaComponent(baseFill).setFill()
+                path.fill()
+                NSColor.white.withAlphaComponent(baseStroke).setStroke()
+                path.lineWidth = 1.5
+                path.stroke()
+            }
+        }
+
+        // Per-screen label only in interactive picker mode — the drag
+        // overlay should stay quiet to feel native.
+        guard interactive else { return }
         let label = regions.isEmpty
             ? "\(displayLabel) — no regions (open Edit Regions…)"
             : displayLabel
@@ -583,7 +619,7 @@ fileprivate final class OverlayView: NSView {
         let bg = NSRect(x: 16, y: bounds.height - size.height - 16 - pad * 2,
                         width: size.width + 2 * pad,
                         height: size.height + 2 * pad)
-        NSColor.black.withAlphaComponent(0.6).setFill()
+        NSColor.black.withAlphaComponent(0.55).setFill()
         NSBezierPath(roundedRect: bg, xRadius: 6, yRadius: 6).fill()
         str.draw(at: NSPoint(x: bg.minX + pad, y: bg.minY + pad))
     }
