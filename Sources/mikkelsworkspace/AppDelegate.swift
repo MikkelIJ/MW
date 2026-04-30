@@ -112,6 +112,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menu.addItem(.separator())
+        let debugItem = NSMenuItem(title: "Debug Logging",
+                                   action: #selector(toggleDebugLogging),
+                                   keyEquivalent: "")
+        debugItem.state = DebugLog.shared.enabled ? .on : .off
+        menu.addItem(debugItem)
+        if DebugLog.shared.enabled {
+            menu.addItem(withTitle: "Reveal Debug Log",
+                         action: #selector(revealDebugLog),
+                         keyEquivalent: "")
+        }
+
+        menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit",
                               action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
@@ -135,6 +147,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Use a synthetic DisplayID to clear it.
         store.setRegions([], for: DisplayID(key: key, label: ""))
         buildMenu()
+    }
+
+    @objc private func toggleDebugLogging() {
+        DebugLog.shared.enabled.toggle()
+        DebugLog.shared.log("--- debug logging \(DebugLog.shared.enabled ? "ENABLED" : "DISABLED") ---")
+        buildMenu()
+    }
+
+    @objc private func revealDebugLog() {
+        NSWorkspace.shared.activateFileViewerSelecting([DebugLog.shared.logFileURL])
     }
 
     // MARK: - Hotkey
