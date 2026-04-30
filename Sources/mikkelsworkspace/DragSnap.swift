@@ -1,19 +1,16 @@
 import AppKit
 import ApplicationServices
-import Carbon.HIToolbox
 
-/// Watches global mouse events. While the user is actively dragging a
-/// window (left mouse button held + window frame moved), the snap
-/// overlay is summoned by **dwelling** — i.e. holding the cursor
-/// roughly still for a short moment. Releasing the left mouse button
-/// over a region snaps the focused window into it.
+/// Watches global mouse events. As soon as a window-titlebar drag is
+/// detected (left button held + focused window's frame moved), the
+/// snap-region overlay is shown. Releasing the left button over a
+/// region snaps the focused window into it.
 ///
-/// Why dwell rather than a key or second click? macOS's window-drag
-/// tracking runloop swallows every non-left-button mouse event and
-/// every `flagsChanged` event for the duration of the drag, so neither
-/// right-click, middle-click, nor any modifier key reach our NSEvent
-/// monitors. `leftMouseDragged` events do, so dwell is the only
-/// reliable in-drag trigger.
+/// This unconditional approach is the only one that works: macOS's
+/// window-drag tracking runloop swallows every non-left-button mouse
+/// event and every `flagsChanged` event, so neither right-click,
+/// middle-click, nor any modifier key reach our NSEvent monitors. Only
+/// `leftMouseDragged`/`leftMouseUp` come through.
 final class DragSnapMonitor {
     private let store: RegionStore
     private let overlay: OverlayWindowController
@@ -25,23 +22,14 @@ final class DragSnapMonitor {
     /// the gesture as a drag (rather than an incidental click).
     private let dragThreshold: CGFloat = 5
 
-    /// How still the cursor must be (within `dwellRadius` for at least
-    /// `dwellDuration`) while dragging before the overlay appears.
-    private let dwellDuration: TimeInterval = 0.35
-    private let dwellRadius: CGFloat = 4
-
     private enum State {
         case idle
         case mouseDown(start: NSPoint,
                        window: AXUIElement?,
-                       initialFrame: NSRect?)        // pressed but not yet a confirmed window drag
-        case dragging(target: AXUIElement?,           // confirmed window drag
-                      overlayShown: Bool,
-                      lastMove: Date,
-                      lastPoint: NSPoint)
+                       initialFrame: NSRect?)
+        case dragging(target: AXUIElement?)
     }
     private var state: State = .idle
-    private var dwellTimer: Timer?
 
     init(store: RegionStore, overlay: OverlayWindowController) {
         self.store = store
@@ -73,8 +61,7 @@ final class DragSnapMonitor {
             if let m { NSEvent.removeMonitor(m) }
         }
         mouseGlobalMonitor = nil; mouseLocalMonitor = nil
-        if case .dragging(_, let shown, _, _) = state, shown { overlay.dismiss() }
-        cancelDwell()
+        if case .dragging = state { overlay.dismiss() }
         state = .idle
         DebugLog.shared.log("DragSnap.stop")
     }
@@ -107,28 +94,18 @@ final class DragSnapMonitor {
                     DebugLog.shared.log("  drag: window frame unchanged, not a window drag")
                     return
                 }
-                DebugLog.shared.log("  drag CONFIRMED: dist=\(Int(dist)) frame moved \(fmt(initial))→\(fmt(now))")
-                state = .dragging(target: win, overlayShown: false,                setOverlay(shown: true, target: win)                                  lastMove: Date(), lastPoint: p)
-                scheduleDwellCheck()
-            case .dragging(let target, let shown, _, let lastPoint):
-                let movement = hypot(p.x - lastPoint.x, p.y - lastPoint.y)
-                if shown {
-                    overlay.updateDragCursor(p)
-                    // Keep `lastMove` fresh while shown so we don't flap.
-                    state = .dragging(target: target, overlayShown: true,
-                                      lastMove: Date(), lastPoint: p)
-                } else if movement >= dwellRadius {
-                    // Real movement → reset the dwell clock.
-                    state = .dragging(target: target, overlayShown: false,
-                                      lastMove: Date(), lastPoint: p)
-                }
+                DebugLog.shared.log("  drag CONFIRMED: dist=\(Int(dist)) frame moved \(fmt(initial))→\(fmt(now)) → showing overlay")
+                state = .dragging(target: win)
+                overlay.presentForDrag()
+                overlay.updateDragCursor(p)
+            case .dragging:
+                overlay.updateDragCursor(p)
             default:
                 break
             }
 
         case .leftMouseUp:
-            cancelDwell()
-            if case .dragging(let target, let shown, _, _) = state, shown {
+            if case .dragging(let target) = state {
                 let drop = overlay.dropTarget(at: NSEvent.mouseLocation)
                 overlay.dismiss()
                 DebugLog.shared.log("  leftUp: drop=\(drop.map(fmt) ?? "nil") target=\(target == nil ? "nil" : "ok")")
@@ -143,45 +120,13 @@ final class DragSnapMonitor {
         }
     }
 
-    // MARK: - Dwell detection
-
-    private func scheduleDwellCheck() {
-        cancelDwell()
-        // Poll every ~80 ms so we notice the dwell as soon as the user
-        // stops moving. We can't rely on a one-shot timer because the
-        // user might keep moving and need the timer to "reset".
-        dwellTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
-            self?.checkDwell()
-        }
-    }
-
-    private func cancelDwell() {
-        dwellTimer?.invalidate()
-        dwellTimer = nil
-    }
-
-    private func checkDwell() {
-        guard case .dragging(let target, let shown, let lastMove, let lastPoint) = state else {
-            cancelDwell()
-            return
-        }
-        if shown { return }
-        let elapsed = Date().timeIntervalSince(lastMove)
-        guard elapsed >= dwellDuration else { return }
-        DebugLog.shared.log("  DWELL: \(Int(elapsed * 1000))ms still at \(fmt(lastPoint)) → showing overlay")
-        overlay.presentForDrag()
-        overlay.updateDragCursor(lastPoint)
-        state = .dragging(target: target, overlayShown: true,
-                          lastMove: Date(), lastPoint: lastPoint)
-    }
-
     // MARK: - Debug helpers
 
     private func stateName() -> String {
         switch state {
         case .idle: return "idle"
         case .mouseDown: return "mouseDown"
-        case .dragging(_, let s, _, _): return "dragging(overlay=\(s))"
+        case .dragging: return "dragging"
         }
     }
 
