@@ -32,6 +32,10 @@ final class DragSnapMonitor {
     private var rightClickThread: Thread?
     private var rightClickRunLoop: CFRunLoop?
 
+    /// Tracks Option-key state across `flagsChanged` events so we can
+    /// edge-detect press/release transitions during a drag.
+    fileprivate var optionDownDuringDrag: Bool = false
+
     /// Pixels the mouse must travel after mouse-down before we treat
     /// the gesture as a drag (rather than an incidental click).
     private let dragThreshold: CGFloat = 5
@@ -167,6 +171,7 @@ final class DragSnapMonitor {
                 break
             }
             state = .idle
+            optionDownDuringDrag = false
 
         default:
             break
@@ -202,6 +207,7 @@ final class DragSnapMonitor {
         guard rightClickTap == nil else { return }
         let mask = CGEventMask(1 << CGEventType.rightMouseDown.rawValue)
                  | CGEventMask(1 << CGEventType.rightMouseUp.rawValue)
+                 | CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             // The tap can be disabled by the system if it ever blocks
@@ -219,12 +225,16 @@ final class DragSnapMonitor {
             let monitor = Unmanaged<DragSnapMonitor>.fromOpaque(refcon).takeUnretainedValue()
             // Only intercept while we're actively dragging a window.
             // Outside a drag, hand the event back so normal right-click
-            // context menus continue to work.
+            // context menus and modifier-key handling continue to work.
             switch type {
             case .rightMouseDown:
                 if monitor.handleRightDownFromTap() { return nil }
             case .rightMouseUp:
                 if monitor.handleRightUpFromTap() { return nil }
+            case .flagsChanged:
+                let flags = event.flags
+                let optionDown = flags.contains(.maskAlternate)
+                if monitor.handleOptionFromTap(down: optionDown) { return nil }
             default:
                 break
             }
@@ -310,6 +320,42 @@ final class DragSnapMonitor {
     /// happens on right-up so the gesture behaves like a normal click.
     private func handleRightDownWhileDragging() {
         // Intentionally empty.
+    }
+
+    /// Option-key handler called from the CGEventTap thread. Trackpads
+    /// don't deliver `rightMouseDown`/`rightMouseUp` while the user is
+    /// holding a one-finger click-drag (the multitouch driver consumes
+    /// extra fingers as continuations of the existing gesture), so the
+    /// Option key is offered as a parallel trigger that *does* reach
+    /// the event tap during a drag. The semantics mirror the right
+    /// button:
+    ///   • first Option-press during a drag → present overlay,
+    ///   • each subsequent Option-press → cycle to next region,
+    ///   • releasing the left mouse while overlay is shown → snap.
+    /// Returns true if the event was consumed (only when we actually
+    /// acted on it — outside a drag, Option must propagate normally).
+    fileprivate func handleOptionFromTap(down: Bool) -> Bool {
+        guard case .dragging = state else {
+            optionDownDuringDrag = false
+            return false
+        }
+        // Edge-detect: ignore unchanged states (flagsChanged fires for
+        // every modifier toggle).
+        guard down != optionDownDuringDrag else { return false }
+        optionDownDuringDrag = down
+        let p = NSEvent.mouseLocation
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if down {
+                // Treat like a right-button release: present or cycle.
+                self.handleRightUpWhileDragging(at: p)
+            }
+            // Releasing Option does nothing; the overlay stays up so
+            // the user can still drop into the highlighted region.
+            // (If we hid on release, the user would have to keep Option
+            // pressed for the whole drag, which is uncomfortable.)
+        }
+        return true
     }
 
     /// Right-button-up during a drag drives the overlay:
