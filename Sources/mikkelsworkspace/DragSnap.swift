@@ -22,11 +22,15 @@ final class DragSnapMonitor {
 
     private var mouseGlobalMonitor: Any?
     private var mouseLocalMonitor: Any?
+    private var rightMouseGlobalMonitor: Any?
 
     // Right-click event tap (for cycling overlapping regions while a
-    // window drag is in progress).
+    // window drag is in progress). Hosted on a dedicated background
+    // thread so AppKit's window-drag tracking loop can't starve it.
     private var rightClickTap: CFMachPort?
     private var rightClickRunLoopSource: CFRunLoopSource?
+    private var rightClickThread: Thread?
+    private var rightClickRunLoop: CFRunLoop?
 
     /// Pixels the mouse must travel after mouse-down before we treat
     /// the gesture as a drag (rather than an incidental click).
@@ -63,15 +67,29 @@ final class DragSnapMonitor {
                 return e
             }
         }
+        // NSEvent fallback for right-click cycling. The CGEventTap is
+        // the primary path (it sees events first and lets us *consume*
+        // them so they don't pop a context menu), but on systems where
+        // the tap fails to install — e.g. Accessibility was reset by an
+        // upgrade and the user hasn't re-granted it — this NSEvent
+        // monitor still picks up right-clicks delivered to other apps.
+        if rightMouseGlobalMonitor == nil {
+            rightMouseGlobalMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.rightMouseDown]) { [weak self] _ in
+                _ = self?.cycleIfDragging(at: NSEvent.mouseLocation)
+            }
+        }
         installRightClickTap()
         DebugLog.shared.log("DragSnap.start: monitors installed")
     }
 
     func stop() {
-        for m in [mouseGlobalMonitor, mouseLocalMonitor] {
+        for m in [mouseGlobalMonitor, mouseLocalMonitor, rightMouseGlobalMonitor] {
             if let m { NSEvent.removeMonitor(m) }
         }
-        mouseGlobalMonitor = nil; mouseLocalMonitor = nil
+        mouseGlobalMonitor = nil
+        mouseLocalMonitor = nil
+        rightMouseGlobalMonitor = nil
         removeRightClickTap()
         if case .dragging = state { overlay.dismiss() }
         state = .idle
@@ -161,6 +179,17 @@ final class DragSnapMonitor {
         let mask = CGEventMask(1 << CGEventType.rightMouseDown.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let callback: CGEventTapCallBack = { _, type, event, refcon in
+            // The tap can be disabled by the system if it ever blocks
+            // for too long; re-enable on the spot.
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let refcon {
+                    let monitor = Unmanaged<DragSnapMonitor>.fromOpaque(refcon).takeUnretainedValue()
+                    if let tap = monitor.rightClickTap {
+                        CGEvent.tapEnable(tap: tap, enable: true)
+                    }
+                }
+                return Unmanaged.passUnretained(event)
+            }
             guard type == .rightMouseDown, let refcon else {
                 return Unmanaged.passUnretained(event)
             }
@@ -168,56 +197,76 @@ final class DragSnapMonitor {
             // Only intercept while we're actively dragging a window.
             // Hand the event back to the system in every other case so
             // normal right-click context menus continue to work.
-            let consume = monitor.handleRightMouseDownFromTap(event: event)
+            let consume = monitor.handleRightMouseDownFromTap()
             if consume { return nil }
             return Unmanaged.passUnretained(event)
         }
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap,
                                           place: .headInsertEventTap,
                                           options: .defaultTap,
-                                          eventsOfInterest: mask,
+                                          eventsOfInterest: mask
+                                              | CGEventMask(1 << CGEventType.tapDisabledByTimeout.rawValue)
+                                              | CGEventMask(1 << CGEventType.tapDisabledByUserInput.rawValue),
                                           callback: callback,
                                           userInfo: refcon) else {
+            NSLog("MW: CGEvent.tapCreate failed — right-click cycling will fall back to NSEvent monitor (works only outside the dragged window's own app).")
             DebugLog.shared.log("DragSnap.installRightClickTap: tapCreate failed (no Accessibility?)")
             return
         }
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
         rightClickTap = tap
-        rightClickRunLoopSource = source
-        DebugLog.shared.log("DragSnap.installRightClickTap: installed")
+        // Run the tap on its own dedicated thread so AppKit's
+        // window-drag tracking loop on the main thread can never starve
+        // it. Without this, right-clicks issued mid-drag arrive *after*
+        // the user has already released the left button.
+        let thread = Thread { [weak self] in
+            guard let self else { return }
+            let runLoop = CFRunLoopGetCurrent()
+            self.rightClickRunLoop = runLoop
+            let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+            self.rightClickRunLoopSource = source
+            CFRunLoopAddSource(runLoop, source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            // Park here forever; CFRunLoopStop is called from `stop()`.
+            while !Thread.current.isCancelled {
+                CFRunLoopRunInMode(.defaultMode, 1.0, false)
+            }
+        }
+        thread.name = "MW.RightClickEventTap"
+        thread.qualityOfService = .userInteractive
+        rightClickThread = thread
+        thread.start()
+        DebugLog.shared.log("DragSnap.installRightClickTap: installed on dedicated thread")
     }
 
     private func removeRightClickTap() {
         if let tap = rightClickTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
-        if let source = rightClickRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        if let runLoop = rightClickRunLoop {
+            CFRunLoopStop(runLoop)
         }
+        rightClickThread?.cancel()
         rightClickTap = nil
         rightClickRunLoopSource = nil
+        rightClickRunLoop = nil
+        rightClickThread = nil
     }
 
     /// Called from the CGEventTap thread. Returns true if the event was
     /// consumed (i.e. we used it to cycle and don't want it to propagate).
-    fileprivate func handleRightMouseDownFromTap(event: CGEvent) -> Bool {
-        // The CG location origin is top-left, screen-pixel coordinates.
-        // NSEvent.mouseLocation uses bottom-left Cocoa coordinates and
-        // is what the overlay views expect.
+    fileprivate func handleRightMouseDownFromTap() -> Bool {
+        // Snapshot state from the background thread; the actual cycle
+        // (which touches AppKit views) is dispatched onto main.
+        guard case .dragging = state else { return false }
         let cocoaPoint = NSEvent.mouseLocation
-        // Cycle synchronously on the main thread so the next leftMouseUp
-        // sees the updated selection.
-        var didCycle = false
-        if Thread.isMainThread {
-            didCycle = self.cycleIfDragging(at: cocoaPoint)
-        } else {
-            DispatchQueue.main.sync {
-                didCycle = self.cycleIfDragging(at: cocoaPoint)
-            }
+        // Sync to main is unsafe — the main thread may be blocked in
+        // AppKit's window-drag tracking syscall. Dispatch async and
+        // assume we're consuming the event regardless: it's better to
+        // swallow a stray right-click than to deadlock.
+        DispatchQueue.main.async { [weak self] in
+            _ = self?.cycleIfDragging(at: cocoaPoint)
         }
-        return didCycle
+        return true
     }
 
     private func cycleIfDragging(at point: NSPoint) -> Bool {
