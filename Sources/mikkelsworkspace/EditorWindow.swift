@@ -285,7 +285,7 @@ private final class EditorView: NSView {
     }
     override func mouseDragged(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if var r = resizing {
+        if let r = resizing {
             let dx = p.x - r.anchor.x
             let dy = p.y - r.anchor.y
             var new = r.original
@@ -303,8 +303,11 @@ private final class EditorView: NSView {
             if new.maxX > bounds.width  { new.size.width  = bounds.width  - new.origin.x }
             if new.maxY > bounds.height { new.size.height = bounds.height - new.origin.y }
             working[r.index] = new
-            r.original = new // not necessary since we use r.original+delta from anchor
-            resizing = (r.index, r.edges, r.original, r.anchor)
+            // NB: keep `resizing.original` and `resizing.anchor` fixed
+            // at the mouse-down state — every drag tick recomputes from
+            // the *cumulative* delta. Mutating `original` here would
+            // double-apply the delta and the edge would race past the
+            // cursor.
             needsDisplay = true
             return
         }
