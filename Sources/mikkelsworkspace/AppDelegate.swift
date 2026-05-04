@@ -366,11 +366,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func notifyNoWindow() {
         let a = NSAlert()
-        a.messageText = "No focused window to snap"
+        a.messageText = "Click the window you want to snap"
+        let hint = currentCombo.isEmpty
+            ? "Click into the window you want to snap, then trigger MW again."
+            : "Click into the window you want to snap, then press \(currentCombo.display) again."
         a.informativeText = """
-        MW couldn’t find a focused window when you triggered the \
-        hotkey. Click into the window you want to snap, then press \
-        \(currentCombo.display) again.
+        MW didn’t have a focused window to move into the selected region.
+
+        \(hint)
 
         If this keeps happening, your bundle may not have Accessibility \
         access — see Preferences ▸ Privacy & Security ▸ Accessibility.

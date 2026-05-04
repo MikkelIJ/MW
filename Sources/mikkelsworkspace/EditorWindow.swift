@@ -86,12 +86,11 @@ private final class EditorView: NSView {
     private let onCommit: () -> Void
     private let onCancel: () -> Void
 
-    // Snap-to-grid (toggle with G). Grid dimensions come from
-    // Preferences; default 12×12 hits halves, thirds, quarters,
-    // sixths and twelfths cleanly.
+    // Snap-to-grid (toggle with G). Grid dimensions adapt to the
+    // display so cells are uniformly sized in points across monitors.
     private var snapToGrid: Bool = true
-    private var gridCols: CGFloat = CGFloat(GridSettings.columns)
-    private var gridRows: CGFloat = CGFloat(GridSettings.rows)
+    private var gridCols: CGFloat
+    private var gridRows: CGFloat
 
     // Resize state.
     private struct EdgeMask: OptionSet {
@@ -110,6 +109,8 @@ private final class EditorView: NSView {
         self.display = display
         self.onCommit = onCommit
         self.onCancel = onCancel
+        self.gridCols = CGFloat(GridSettings.columns(forDisplaySize: frame.size))
+        self.gridRows = CGFloat(GridSettings.rows(forDisplaySize: frame.size))
         super.init(frame: frame)
         // Seed working set from stored fractions (top-down → bottom-up).
         working = existing.map { r in
@@ -484,6 +485,17 @@ final class OverlayWindowController {
         }
         return nil
     }
+
+    /// Cycle the hover selection on whichever overlay contains
+    /// `screenPoint`. Used by right-click during a drag to step through
+    /// stacked / overlapping regions. Returns true if a cycle happened.
+    @discardableResult
+    func cycleHover(at screenPoint: NSPoint) -> Bool {
+        for view in views where view.screenFrame.contains(screenPoint) {
+            return view.cycleHoverSelection()
+        }
+        return false
+    }
 }
 
 fileprivate final class OverlayView: NSView {
@@ -493,8 +505,20 @@ fileprivate final class OverlayView: NSView {
     private let hasAnyRegion: Bool
     private let onPick: ((NSRect?) -> Void)?
     private let interactive: Bool
-    private var hover: Int? = nil
+    /// Indices of every region under the cursor, top-most first.
+    /// In drag mode the user can right-click to cycle through them.
+    private var hoverCandidates: [Int] = []
+    /// Offset into `hoverCandidates`. Reset to 0 whenever the candidate
+    /// set changes (i.e. cursor moved over a different stack of regions).
+    private var hoverCycleOffset: Int = 0
     private var trackingArea: NSTrackingArea?
+
+    /// Convenience: currently-selected hover index (after cycling), or nil.
+    private var hover: Int? {
+        guard !hoverCandidates.isEmpty else { return nil }
+        let idx = hoverCycleOffset % hoverCandidates.count
+        return hoverCandidates[idx]
+    }
 
     init(frame: NSRect,
          regions: [Region],
@@ -530,20 +554,43 @@ fileprivate final class OverlayView: NSView {
     /// Local-coordinate hit test. Used by drag mode (passes points
     /// translated from a global mouse position).
     fileprivate func regionRect(atLocal p: NSPoint) -> NSRect? {
+        // Honour any active right-click cycle: if the cursor is still
+        // over the same stack we currently hover, return *that*
+        // selection rather than the topmost one.
+        if let h = hover, regions.indices.contains(h),
+           localRect(for: regions[h]).contains(p) {
+            return regions[h].rect(in: screenFrame)
+        }
         guard let idx = regions.indices.last(where: { localRect(for: regions[$0]).contains(p) })
         else { return nil }
         return regions[idx].rect(in: screenFrame)
     }
 
+    /// Compute every region containing `p`, top-most first.
+    private func candidates(atLocal p: NSPoint) -> [Int] {
+        // `regions` are stored bottom-up (later = drawn on top), so
+        // reverse to get top-most first.
+        regions.indices.reversed().filter { localRect(for: regions[$0]).contains(p) }
+    }
+
     /// Drive hover externally (the window is mouse-transparent in drag mode).
     fileprivate func setExternalHover(localPoint p: NSPoint?) {
-        let newHover: Int?
-        if let p {
-            newHover = regions.indices.last { localRect(for: regions[$0]).contains(p) }
-        } else {
-            newHover = nil
+        let newCandidates = p.map { candidates(atLocal: $0) } ?? []
+        if newCandidates != hoverCandidates {
+            hoverCandidates = newCandidates
+            hoverCycleOffset = 0
+            needsDisplay = true
         }
-        if newHover != hover { hover = newHover; needsDisplay = true }
+    }
+
+    /// Advance the hover selection through the stack of regions under
+    /// the cursor. Returns true if there was something to cycle.
+    @discardableResult
+    fileprivate func cycleHoverSelection() -> Bool {
+        guard hoverCandidates.count > 1 else { return false }
+        hoverCycleOffset = (hoverCycleOffset + 1) % hoverCandidates.count
+        needsDisplay = true
+        return true
     }
 
     private func localRect(for r: Region) -> NSRect {
@@ -552,6 +599,40 @@ fileprivate final class OverlayView: NSView {
         let h = r.h * bounds.height
         let y = bounds.height - (r.y * bounds.height + h)
         return NSRect(x: x, y: y, width: w, height: h)
+    }
+
+    /// Draw a 1-based region index centered in `rect` so users can see
+    /// at a glance which slot each region corresponds to (matches the
+    /// "Region N" Instant-Snap hotkeys in Preferences).
+    private func drawRegionNumber(_ n: Int, in rect: NSRect, isHover: Bool) {
+        let label = "\(n)"
+        // Scale the badge with the region but cap it so a tiny region
+        // still gets a readable, in-bounds number.
+        let target = min(rect.width, rect.height) * 0.35
+        let fontSize = max(18, min(72, target))
+        let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
+
+        let textColor: NSColor = isHover
+            ? NSColor.black.withAlphaComponent(0.85)
+            : NSColor.white.withAlphaComponent(0.95)
+        let shadowColor: NSColor = isHover
+            ? NSColor.white.withAlphaComponent(0.6)
+            : NSColor.black.withAlphaComponent(0.55)
+        let shadow = NSShadow()
+        shadow.shadowColor = shadowColor
+        shadow.shadowBlurRadius = 4
+        shadow.shadowOffset = .zero
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .shadow: shadow,
+        ]
+        let str = NSAttributedString(string: label, attributes: attrs)
+        let size = str.size()
+        let origin = NSPoint(x: rect.midX - size.width  / 2,
+                             y: rect.midY - size.height / 2)
+        str.draw(at: origin)
     }
 
     override func draw(_ dirty: NSRect) {
@@ -601,6 +682,8 @@ fileprivate final class OverlayView: NSView {
                 path.lineWidth = 1.5
                 path.stroke()
             }
+
+            drawRegionNumber(i + 1, in: rect, isHover: isHover)
         }
 
         // Per-screen label only in interactive picker mode — the drag
@@ -627,18 +710,31 @@ fileprivate final class OverlayView: NSView {
     override func mouseMoved(with event: NSEvent) {
         guard interactive else { return }
         let p = convert(event.locationInWindow, from: nil)
-        let newHover = regions.indices.last { localRect(for: regions[$0]).contains(p) }
-        if newHover != hover { hover = newHover; needsDisplay = true }
+        let newCandidates = candidates(atLocal: p)
+        if newCandidates != hoverCandidates {
+            hoverCandidates = newCandidates
+            hoverCycleOffset = 0
+            needsDisplay = true
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
         guard interactive else { return }
         let p = convert(event.locationInWindow, from: nil)
-        if let idx = regions.indices.last(where: { localRect(for: regions[$0]).contains(p) }) {
+        if let h = hover, regions.indices.contains(h),
+           localRect(for: regions[h]).contains(p) {
+            onPick?(regions[h].rect(in: screenFrame))
+        } else if let idx = regions.indices.last(where: { localRect(for: regions[$0]).contains(p) }) {
             onPick?(regions[idx].rect(in: screenFrame))
         } else {
             onPick?(nil)
         }
+    }
+
+    /// Right-click in the interactive picker also cycles overlapping regions.
+    override func rightMouseDown(with event: NSEvent) {
+        guard interactive else { return }
+        if !cycleHoverSelection() { super.rightMouseDown(with: event) }
     }
 
     override func keyDown(with event: NSEvent) {
