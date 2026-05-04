@@ -127,54 +127,36 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
 
         // Editor grid size
         y -= 8
-        let gridHeader = NSTextField(labelWithString: "Editor Grid Size (snap-to-grid)")
+        let gridHeader = NSTextField(labelWithString: "Editor Grid Size (snap-to-grid, square cells)")
         gridHeader.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         gridHeader.frame = NSRect(x: 20, y: y - 18, width: contentW - 40, height: 18)
         content.addSubview(gridHeader)
         y -= 18 + 8
 
-        let colsLabel = NSTextField(labelWithString: "Columns")
-        colsLabel.font = NSFont.systemFont(ofSize: 12)
-        colsLabel.textColor = .secondaryLabelColor
-        colsLabel.frame = NSRect(x: 20, y: y - 22, width: 70, height: 18)
-        content.addSubview(colsLabel)
+        let cellsLabel = NSTextField(labelWithString: "Cells across main display")
+        cellsLabel.font = NSFont.systemFont(ofSize: 12)
+        cellsLabel.textColor = .secondaryLabelColor
+        cellsLabel.frame = NSRect(x: 20, y: y - 22, width: 200, height: 18)
+        content.addSubview(cellsLabel)
 
-        let colsField = NSTextField(frame: NSRect(x: 95, y: y - 26, width: 50, height: 22))
-        colsField.alignment = .right
-        colsField.integerValue = GridSettings.columns
-        content.addSubview(colsField)
+        let cellsField = NSTextField(frame: NSRect(x: 225, y: y - 26, width: 55, height: 22))
+        cellsField.alignment = .right
+        cellsField.integerValue = GridSettings.cellsAcrossMain
+        content.addSubview(cellsField)
 
-        let colsStepper = NSStepper(frame: NSRect(x: 150, y: y - 28, width: 20, height: 28))
-        colsStepper.minValue = Double(GridSettings.minSize)
-        colsStepper.maxValue = Double(GridSettings.maxSize)
-        colsStepper.integerValue = GridSettings.columns
-        content.addSubview(colsStepper)
-
-        let rowsLabel = NSTextField(labelWithString: "Rows")
-        rowsLabel.font = NSFont.systemFont(ofSize: 12)
-        rowsLabel.textColor = .secondaryLabelColor
-        rowsLabel.frame = NSRect(x: 200, y: y - 22, width: 50, height: 18)
-        content.addSubview(rowsLabel)
-
-        let rowsField = NSTextField(frame: NSRect(x: 245, y: y - 26, width: 50, height: 22))
-        rowsField.alignment = .right
-        rowsField.integerValue = GridSettings.rows
-        content.addSubview(rowsField)
-
-        let rowsStepper = NSStepper(frame: NSRect(x: 300, y: y - 28, width: 20, height: 28))
-        rowsStepper.minValue = Double(GridSettings.minSize)
-        rowsStepper.maxValue = Double(GridSettings.maxSize)
-        rowsStepper.integerValue = GridSettings.rows
-        content.addSubview(rowsStepper)
+        let cellsStepper = NSStepper(frame: NSRect(x: 285, y: y - 28, width: 20, height: 28))
+        cellsStepper.minValue = Double(GridSettings.minCells)
+        cellsStepper.maxValue = Double(GridSettings.maxCells)
+        cellsStepper.integerValue = GridSettings.cellsAcrossMain
+        content.addSubview(cellsStepper)
 
         let gridReset = NSButton(title: "Reset", target: nil, action: nil)
         gridReset.bezelStyle = .rounded
-        gridReset.frame = NSRect(x: 330, y: y - 28, width: 70, height: 28)
+        gridReset.frame = NSRect(x: 320, y: y - 28, width: 80, height: 28)
         content.addSubview(gridReset)
 
         // Wire stepper ↔ field ↔ persisted setting.
-        let bridge = GridBridge(colsField: colsField, colsStepper: colsStepper,
-                                rowsField: rowsField, rowsStepper: rowsStepper,
+        let bridge = GridBridge(field: cellsField, stepper: cellsStepper,
                                 resetButton: gridReset)
         self.gridBridge = bridge
         bridge.attach()
@@ -423,68 +405,54 @@ final class RegionPreviewView: NSView {
 /// Glues the columns/rows steppers + text fields to `GridSettings`,
 /// keeping them in sync and persisting changes.
 private final class GridBridge: NSObject, NSTextFieldDelegate {
-    private let colsField: NSTextField
-    private let colsStepper: NSStepper
-    private let rowsField: NSTextField
-    private let rowsStepper: NSStepper
+    private let field: NSTextField
+    private let stepper: NSStepper
     private let resetButton: NSButton
+    private let preview = GridPreviewController()
 
-    init(colsField: NSTextField, colsStepper: NSStepper,
-         rowsField: NSTextField, rowsStepper: NSStepper,
-         resetButton: NSButton) {
-        self.colsField = colsField
-        self.colsStepper = colsStepper
-        self.rowsField = rowsField
-        self.rowsStepper = rowsStepper
+    init(field: NSTextField, stepper: NSStepper, resetButton: NSButton) {
+        self.field = field
+        self.stepper = stepper
         self.resetButton = resetButton
     }
 
     func attach() {
-        colsField.delegate = self
-        rowsField.delegate = self
-        colsStepper.target = self
-        colsStepper.action = #selector(colsStepperChanged)
-        rowsStepper.target = self
-        rowsStepper.action = #selector(rowsStepperChanged)
+        field.delegate = self
+        stepper.target = self
+        stepper.action = #selector(stepperChanged)
         resetButton.target = self
         resetButton.action = #selector(resetGrid)
     }
 
-    @objc private func colsStepperChanged() {
-        colsField.integerValue = colsStepper.integerValue
-        GridSettings.columns = colsStepper.integerValue
-    }
-    @objc private func rowsStepperChanged() {
-        rowsField.integerValue = rowsStepper.integerValue
-        GridSettings.rows = rowsStepper.integerValue
-    }
-    @objc private func resetGrid() {
-        colsField.integerValue   = GridSettings.defaultCols
-        colsStepper.integerValue = GridSettings.defaultCols
-        rowsField.integerValue   = GridSettings.defaultRows
-        rowsStepper.integerValue = GridSettings.defaultRows
-        GridSettings.columns = GridSettings.defaultCols
-        GridSettings.rows    = GridSettings.defaultRows
-    }
-
-    func refresh() {
-        colsField.integerValue   = GridSettings.columns
-        colsStepper.integerValue = GridSettings.columns
-        rowsField.integerValue   = GridSettings.rows
-        rowsStepper.integerValue = GridSettings.rows
+    @objc private func stepperChanged() {
+        commit(stepper.integerValue)
     }
 
     func controlTextDidChange(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField else { return }
-        let value = max(GridSettings.minSize,
-                        min(GridSettings.maxSize, field.integerValue))
-        if field === colsField {
-            colsStepper.integerValue = value
-            GridSettings.columns = value
-        } else if field === rowsField {
-            rowsStepper.integerValue = value
-            GridSettings.rows = value
-        }
+        guard (obj.object as AnyObject?) === field else { return }
+        commit(field.integerValue)
+    }
+
+    @objc private func resetGrid() {
+        commit(GridSettings.defaultCellsAcrossMain)
+    }
+
+    func refresh() {
+        let v = GridSettings.cellsAcrossMain
+        field.integerValue = v
+        stepper.integerValue = v
+    }
+
+    private func commit(_ raw: Int) {
+        let clamped = max(GridSettings.minCells,
+                          min(GridSettings.maxCells, raw))
+        field.integerValue = clamped
+        stepper.integerValue = clamped
+        guard clamped != GridSettings.cellsAcrossMain || true else { return }
+        GridSettings.cellsAcrossMain = clamped
+        NotificationCenter.default.post(name: .gridSettingsChanged, object: nil)
+        // Show / refresh the live grid preview across all displays.
+        preview.showBriefly()
     }
 }
 

@@ -229,8 +229,8 @@ private final class EditorView: NSView {
     private func drawHud() {
         let title = "Editing: \(display.label)"
         let snap  = snapToGrid ? "ON" : "off"
-        let grid  = "\(Int(gridCols))×\(Int(gridRows))"
-        let hint  = "Drag empty space to add · Drag edges to resize · Click inside to remove · G: snap-to-grid (\(snap), \(grid)) · Return saves all · Esc cancels"
+        let grid  = "\(Int(gridCols))×\(Int(gridRows)) (cells across main: \(GridSettings.cellsAcrossMain))"
+        let hint  = "Drag empty space to add · Drag edges to resize · Click inside to remove · G: snap-to-grid (\(snap), \(grid)) · + / − adjust grid · Return saves all · Esc cancels"
 
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
@@ -335,8 +335,37 @@ private final class EditorView: NSView {
             snapToGrid.toggle()
             if snapToGrid { working = working.map { snap($0) } }
             needsDisplay = true
+        case 24, 69:                         // = / keypad + → finer grid
+            adjustGrid(by: +1)
+        case 27, 78:                         // - / keypad - → coarser grid
+            adjustGrid(by: -1)
         default:        super.keyDown(with: event)
         }
+    }
+
+    /// Bump the global grid setting and re-derive this view's
+    /// columns/rows from the new (square) cell size.
+    private func adjustGrid(by delta: Int) {
+        let new = max(GridSettings.minCells,
+                      min(GridSettings.maxCells,
+                          GridSettings.cellsAcrossMain + delta))
+        guard new != GridSettings.cellsAcrossMain else { return }
+        GridSettings.cellsAcrossMain = new
+        gridCols = CGFloat(GridSettings.columns(forDisplaySize: bounds.size))
+        gridRows = CGFloat(GridSettings.rows(forDisplaySize: bounds.size))
+        if snapToGrid { working = working.map { snap($0) } }
+        // Force the grid lines visible while the user is tweaking — the
+        // snap-to-grid toggle being off would otherwise hide them.
+        let wasSnap = snapToGrid
+        snapToGrid = true
+        needsDisplay = true
+        if !wasSnap {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.snapToGrid = false
+                self?.needsDisplay = true
+            }
+        }
+        NotificationCenter.default.post(name: .gridSettingsChanged, object: nil)
     }
 }
 
@@ -741,5 +770,100 @@ fileprivate final class OverlayView: NSView {
         guard interactive else { super.keyDown(with: event); return }
         if event.keyCode == 53 { onPick?(nil) } // Esc
         else { super.keyDown(with: event) }
+    }
+}
+
+// =====================================================================
+// MARK: - Grid Preview (transient overlay across all displays)
+// =====================================================================
+
+/// A short-lived, click-through overlay on every screen that just draws
+/// the current snap grid. Used by Preferences so the user can see the
+/// effect of changing the grid size live.
+final class GridPreviewController {
+    private var windows: [NSWindow] = []
+    private var workItem: DispatchWorkItem?
+
+    func showBriefly(duration: TimeInterval = 1.5) {
+        present()
+        workItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.dismiss() }
+        workItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: item)
+    }
+
+    func present() {
+        dismiss()
+        for screen in NSScreen.screens {
+            let frame = screen.visibleFrame
+            let win = NSWindow(contentRect: NSRect(origin: .zero, size: frame.size),
+                               styleMask: .borderless,
+                               backing: .buffered, defer: false)
+            win.level = .mainMenu + 1
+            win.isOpaque = false
+            win.backgroundColor = .clear
+            win.ignoresMouseEvents = true
+            win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            win.hasShadow = false
+            win.setFrame(frame, display: false)
+            let view = GridPreviewView(frame: NSRect(origin: .zero, size: frame.size))
+            win.contentView = view
+            win.setFrame(frame, display: true)
+            win.orderFrontRegardless()
+            windows.append(win)
+        }
+    }
+
+    func dismiss() {
+        workItem?.cancel(); workItem = nil
+        windows.forEach { $0.orderOut(nil) }
+        windows.removeAll()
+    }
+}
+
+private final class GridPreviewView: NSView {
+    override func draw(_ dirty: NSRect) {
+        // Faint background so the grid is visible against any wallpaper.
+        NSColor.black.withAlphaComponent(0.18).setFill()
+        bounds.fill()
+
+        let cols = CGFloat(GridSettings.columns(forDisplaySize: bounds.size))
+        let rows = CGFloat(GridSettings.rows(forDisplaySize: bounds.size))
+        let stepX = bounds.width  / cols
+        let stepY = bounds.height / rows
+
+        NSColor.white.withAlphaComponent(0.55).setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 1
+        var x = stepX
+        while x < bounds.width {
+            path.move(to: NSPoint(x: x, y: 0))
+            path.line(to: NSPoint(x: x, y: bounds.height))
+            x += stepX
+        }
+        var y = stepY
+        while y < bounds.height {
+            path.move(to: NSPoint(x: 0, y: y))
+            path.line(to: NSPoint(x: bounds.width, y: y))
+            y += stepY
+        }
+        path.stroke()
+
+        // Caption with the current value.
+        let caption = "Grid: \(GridSettings.cellsAcrossMain) cells across main · \(Int(cols))×\(Int(rows)) here"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ]
+        let str = NSAttributedString(string: caption, attributes: attrs)
+        let size = str.size()
+        let pad: CGFloat = 10
+        let bg = NSRect(x: (bounds.width - size.width) / 2 - pad,
+                        y: bounds.height - size.height - 24 - pad,
+                        width: size.width + 2 * pad,
+                        height: size.height + 2 * pad)
+        NSColor.black.withAlphaComponent(0.65).setFill()
+        NSBezierPath(roundedRect: bg, xRadius: 6, yRadius: 6).fill()
+        str.draw(at: NSPoint(x: bg.minX + pad, y: bg.minY + pad))
     }
 }

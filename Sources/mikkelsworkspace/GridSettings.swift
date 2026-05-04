@@ -1,69 +1,64 @@
 import Foundation
 import AppKit
 
-/// Persisted grid size (columns × rows) used by the region editor's
-/// snap-to-grid feature.
+/// Persisted snap-grid setting used by the region editor.
 ///
-/// The stored `columns`/`rows` describe the grid for the *main* display.
-/// Other displays derive their own column/row counts so that one grid
-/// cell has roughly the same size in points across every monitor — i.e.
-/// a wider monitor gets more columns, a taller monitor gets more rows,
-/// and the snap grid never looks "stretched".
+/// The grid is now defined by a single number — `cellsAcrossMain` — i.e.
+/// how many columns the grid has on the *main* display. The cell is
+/// always a perfect square (in points), so:
+///   * the cell size in points = mainDisplay.width / cellsAcrossMain
+///   * other displays derive their own column/row count from that cell
+///     size, keeping cells uniformly sized across every monitor.
 enum GridSettings {
-    private static let colsKey = "GridColumns"
-    private static let rowsKey = "GridRows"
+    private static let cellsKey = "GridCellsAcrossMain"
+    // Legacy key retained only so we can migrate gracefully.
+    private static let legacyColsKey = "GridColumns"
 
-    static let defaultCols: Int = 48
-    static let defaultRows: Int = 48
-    static let minSize: Int = 1
-    static let maxSize: Int = 128
+    static let defaultCellsAcrossMain: Int = 24
+    static let minCells: Int = 2
+    static let maxCells: Int = 128
 
-    static var columns: Int {
+    static var cellsAcrossMain: Int {
         get {
-            let v = UserDefaults.standard.integer(forKey: colsKey)
-            return v == 0 ? defaultCols : clamp(v)
+            let v = UserDefaults.standard.integer(forKey: cellsKey)
+            if v != 0 { return clamp(v) }
+            // Migrate from the previous columns/rows pair if present.
+            let legacy = UserDefaults.standard.integer(forKey: legacyColsKey)
+            if legacy != 0 { return clamp(legacy) }
+            return defaultCellsAcrossMain
         }
-        set { UserDefaults.standard.set(clamp(newValue), forKey: colsKey) }
-    }
-
-    static var rows: Int {
-        get {
-            let v = UserDefaults.standard.integer(forKey: rowsKey)
-            return v == 0 ? defaultRows : clamp(v)
-        }
-        set { UserDefaults.standard.set(clamp(newValue), forKey: rowsKey) }
+        set { UserDefaults.standard.set(clamp(newValue), forKey: cellsKey) }
     }
 
     private static func clamp(_ v: Int) -> Int {
-        max(minSize, min(maxSize, v))
+        max(minCells, min(maxCells, v))
     }
 
     // MARK: - Per-display derivation
 
-    /// Reference cell size (in points) derived from the user's preferred
-    /// columns/rows applied to the main display's visible frame.
-    static func referenceCellSize() -> CGSize {
-        let mainFrame = NSScreen.main?.visibleFrame
-            ?? NSScreen.screens.first?.visibleFrame
-            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let w = mainFrame.width  / CGFloat(columns)
-        let h = mainFrame.height / CGFloat(rows)
-        return CGSize(width: max(1, w), height: max(1, h))
+    /// Square cell size in points, derived from the main display.
+    static func cellSize() -> CGFloat {
+        let mainW = NSScreen.main?.visibleFrame.width
+            ?? NSScreen.screens.first?.visibleFrame.width
+            ?? 1440
+        return max(1, mainW / CGFloat(cellsAcrossMain))
     }
 
-    /// Columns to use for a display whose visible frame has the given
-    /// size. The cell width matches the reference cell from the main
-    /// display so the grid is uniform across monitors.
+    /// Columns to use for a display whose visible frame has the given size.
     static func columns(forDisplaySize size: CGSize) -> Int {
-        let cell = referenceCellSize()
-        let n = Int((size.width / cell.width).rounded())
-        return clamp(n)
+        let n = Int((size.width / cellSize()).rounded())
+        return max(1, min(maxCells, n))
     }
 
     /// Rows to use for a display whose visible frame has the given size.
     static func rows(forDisplaySize size: CGSize) -> Int {
-        let cell = referenceCellSize()
-        let n = Int((size.height / cell.height).rounded())
-        return clamp(n)
+        let n = Int((size.height / cellSize()).rounded())
+        return max(1, min(maxCells, n))
     }
+}
+
+extension Notification.Name {
+    /// Posted whenever `GridSettings.cellsAcrossMain` changes, so any
+    /// open editor / preview overlays can re-derive their grids.
+    static let gridSettingsChanged = Notification.Name("MWGridSettingsChanged")
 }
