@@ -444,6 +444,22 @@ final class OverlayWindowController {
         views.removeAll()
     }
 
+    /// True if any drag-mode overlay windows currently exist.
+    var isPresented: Bool { !windows.isEmpty }
+
+    /// Hide overlay windows without tearing down view state — preserves
+    /// each `OverlayView`'s hover-cycle index so the next `showWindows()`
+    /// resumes where the user left off (used by drag-snap when the
+    /// right mouse button is briefly released and pressed again).
+    func hideWindows() {
+        windows.forEach { $0.orderOut(nil) }
+    }
+
+    /// Re-show previously-presented overlay windows.
+    func showWindows() {
+        windows.forEach { $0.orderFrontRegardless() }
+    }
+
     // MARK: - Drag-snap mode
     //
     // Like `present(targetWindow:onPick:)`, but the overlay windows are
