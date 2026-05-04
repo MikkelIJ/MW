@@ -41,7 +41,13 @@ final class DragSnapMonitor {
         case mouseDown(start: NSPoint,
                        window: AXUIElement?,
                        initialFrame: NSRect?)
-        case dragging(target: AXUIElement?)
+        /// Drag confirmed (window has moved past threshold) but the
+        /// user hasn't asked for the snap overlay yet. A right-click
+        /// here arms the overlay.
+        case draggingArmed(target: AXUIElement?)
+        /// Overlay is up and tracking the cursor. Right-clicks now
+        /// cycle through overlapping regions.
+        case draggingActive(target: AXUIElement?)
     }
     private var state: State = .idle
 
@@ -91,7 +97,7 @@ final class DragSnapMonitor {
         mouseLocalMonitor = nil
         rightMouseGlobalMonitor = nil
         removeRightClickTap()
-        if case .dragging = state { overlay.dismiss() }
+        if case .draggingActive = state { overlay.dismiss() }
         state = .idle
         DebugLog.shared.log("DragSnap.stop")
     }
@@ -124,24 +130,33 @@ final class DragSnapMonitor {
                     DebugLog.shared.log("  drag: window frame unchanged, not a window drag")
                     return
                 }
-                DebugLog.shared.log("  drag CONFIRMED: dist=\(Int(dist)) frame moved \(fmt(initial))→\(fmt(now)) → showing overlay")
-                state = .dragging(target: win)
-                overlay.presentForDrag()
-                overlay.updateDragCursor(p)
-            case .dragging:
+                DebugLog.shared.log("  drag CONFIRMED: dist=\(Int(dist)) frame moved \(fmt(initial))→\(fmt(now)) → armed (right-click to show overlay)")
+                state = .draggingArmed(target: win)
+            case .draggingArmed:
+                // Wait for the user to right-click before showing the
+                // overlay.
+                break
+            case .draggingActive:
                 overlay.updateDragCursor(p)
             default:
                 break
             }
 
         case .leftMouseUp:
-            if case .dragging(let target) = state {
+            switch state {
+            case .draggingActive(let target):
                 let drop = overlay.dropTarget(at: NSEvent.mouseLocation)
                 overlay.dismiss()
                 DebugLog.shared.log("  leftUp: drop=\(drop.map(fmt) ?? "nil") target=\(target == nil ? "nil" : "ok")")
                 if let drop {
                     _ = WindowMover.move(window: target, to: drop)
                 }
+            case .draggingArmed:
+                // User dragged but never right-clicked: just let go,
+                // no snap.
+                DebugLog.shared.log("  leftUp: armed but no overlay was requested, ignoring")
+            default:
+                break
             }
             state = .idle
 
@@ -156,7 +171,8 @@ final class DragSnapMonitor {
         switch state {
         case .idle: return "idle"
         case .mouseDown: return "mouseDown"
-        case .dragging: return "dragging"
+        case .draggingArmed: return "draggingArmed"
+        case .draggingActive: return "draggingActive"
         }
     }
 
@@ -255,26 +271,51 @@ final class DragSnapMonitor {
     /// Called from the CGEventTap thread. Returns true if the event was
     /// consumed (i.e. we used it to cycle and don't want it to propagate).
     fileprivate func handleRightMouseDownFromTap() -> Bool {
-        // Snapshot state from the background thread; the actual cycle
+        // Snapshot state from the background thread; the actual UI work
         // (which touches AppKit views) is dispatched onto main.
-        guard case .dragging = state else { return false }
+        switch state {
+        case .draggingArmed, .draggingActive:
+            break
+        default:
+            return false
+        }
         let cocoaPoint = NSEvent.mouseLocation
         // Sync to main is unsafe — the main thread may be blocked in
         // AppKit's window-drag tracking syscall. Dispatch async and
         // assume we're consuming the event regardless: it's better to
         // swallow a stray right-click than to deadlock.
         DispatchQueue.main.async { [weak self] in
-            _ = self?.cycleIfDragging(at: cocoaPoint)
+            self?.handleRightClickWhileDragging(at: cocoaPoint)
         }
         return true
     }
 
-    private func cycleIfDragging(at point: NSPoint) -> Bool {
-        guard case .dragging = state else { return false }
-        let cycled = overlay.cycleHover(at: point)
-        if cycled {
-            DebugLog.shared.log("  rightDown: cycled overlapping region at \(fmt(point))")
+    /// Main-thread handler for a right-click that arrived while a drag
+    /// is in progress. First click presents the overlay; subsequent
+    /// clicks cycle through overlapping regions under the cursor.
+    @discardableResult
+    private func handleRightClickWhileDragging(at point: NSPoint) -> Bool {
+        switch state {
+        case .draggingArmed(let target):
+            overlay.presentForDrag()
+            overlay.updateDragCursor(point)
+            state = .draggingActive(target: target)
+            DebugLog.shared.log("  rightDown: armed → overlay shown at \(fmt(point))")
+            return true
+        case .draggingActive:
+            let cycled = overlay.cycleHover(at: point)
+            if cycled {
+                DebugLog.shared.log("  rightDown: cycled overlapping region at \(fmt(point))")
+            }
+            return cycled
+        default:
+            return false
         }
-        return cycled
+    }
+
+    private func cycleIfDragging(at point: NSPoint) -> Bool {
+        // NSEvent fallback path (used when the CGEventTap couldn't be
+        // installed). Same semantics as the tap callback.
+        return handleRightClickWhileDragging(at: point)
     }
 }
