@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.31"
-  sha256 "9b65e060777aaec9e7a2af7ee69f8a5a8bd1e34bb91831afced9cc248edfc0ac"
+  version "0.7.32"
+  sha256 "91fe83a61a44d824866e915af39218c6fb2299a996b2c7dc0b00028a6015cde4"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -35,11 +35,11 @@ cask "mw" do
   caveats <<~EOS
     What's new in v#{version}:
 
-    ### Removed
-    - The Windows (WPF / .NET 8) port has been dropped. MW is now
-      macOS-only. The `install.ps1` one-liner, the
-      `release-windows.yml` pipeline, and the `windows/` source tree
-      have been deleted; only `MW.zip` is published with each release.
+    ### Fixed
+    - Closing the **MW Debug Log** window with the red traffic-light
+      button now also clears the checkmark next to **Debug Logging** in
+      the menu bar and turns logging off, so the menu state matches
+      whether the log window is actually open.
 
     Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
