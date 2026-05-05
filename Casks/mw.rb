@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.25"
-  sha256 "434436d229f20908e8b54240ad7d707eac130735f4250862bf499aae2c21b6f1"
+  version "0.7.26"
+  sha256 "46889243c826547107ce885eb215f669aa9fad9e9a4f0cebc9c694425f9d1ed6"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -36,11 +36,14 @@ cask "mw" do
     What's new in v#{version}:
 
     ### Added
-    - `brew install --cask mw` and `brew upgrade --cask mw` now print the
-      release notes for the installed version as caveats, so you can see
-      what changed without leaving the terminal. The release pipeline
-      injects the matching `CHANGELOG.md` section into the cask on every
-      tagged release.
+    - New **Report a Bug…** menu item opens a form where you describe the
+      problem, press **Start Recording** to capture debug logs while you
+      reproduce it, then **Send Bug Report** to open a prefilled GitHub
+      issue with the description, environment info, and the captured log
+      slice. Recording leaves your existing debug-logging preference
+      unchanged. If the captured log is too large to fit in the URL, the
+      full report is copied to your clipboard so you can paste it into
+      the issue body.
 
     Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
