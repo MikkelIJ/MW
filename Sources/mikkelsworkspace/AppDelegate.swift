@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var instantCombos: [KeyCombo?] = Array(repeating: nil, count: InstantSnapStore.slotCount)
     private var prefs: PreferencesWindowController?
     private var dragSnap: DragSnapMonitor?
+    private var logWindow: LogWindowController?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         ensureAccessibilityPermission()
@@ -125,46 +126,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DebugLog.shared.enabled.toggle()
         DebugLog.shared.log("--- debug logging \(DebugLog.shared.enabled ? "ENABLED" : "DISABLED") ---")
         if DebugLog.shared.enabled {
-            openLogTailInTerminal()
+            showLogWindow()
+        } else {
+            hideLogWindow()
         }
         buildMenu()
     }
 
-    /// Opens Terminal.app with `tail -F` on the debug log so the user
-    /// can watch events stream live. Uses a temp `.command` file +
-    /// `open -a Terminal` so it works without requiring AppleEvents
-    /// automation permission.
-    private func openLogTailInTerminal() {
-        let logPath = DebugLog.shared.logFileURL.path
-        let scriptURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mw-debug-tail.command")
-        let script = """
-        #!/bin/bash
-        clear
-        echo "MW debug log — \(logPath)"
-        echo "(Close this window or Ctrl-C to stop watching.)"
-        echo
-        # Make sure the log exists so tail doesn't error.
-        : > "\(logPath)" 2>/dev/null || touch "\(logPath)"
-        exec tail -F "\(logPath)"
-        """
-        do {
-            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755],
-                                                  ofItemAtPath: scriptURL.path)
-        } catch {
-            NSLog("openLogTailInTerminal: failed to write script: \(error)")
-            return
+    /// Shows an in-app window that tails the debug log live. Using our
+    /// own window (rather than spawning Terminal.app) means toggling
+    /// debug logging off can reliably close it — we couldn't close a
+    /// Terminal.app window without AppleScript automation permission.
+    private func showLogWindow() {
+        if logWindow == nil {
+            logWindow = LogWindowController(logURL: DebugLog.shared.logFileURL)
         }
-        NSWorkspace.shared.open(
-            [scriptURL],
-            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
-            configuration: NSWorkspace.OpenConfiguration(),
-            completionHandler: { _, error in
-                if let error {
-                    NSLog("openLogTailInTerminal: Terminal launch failed: \(error)")
-                }
-            })
+        logWindow?.showWindow(nil)
+        logWindow?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func hideLogWindow() {
+        logWindow?.close()
+        logWindow = nil
     }
 
     // MARK: - Hotkey
