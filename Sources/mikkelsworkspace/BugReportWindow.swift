@@ -132,6 +132,13 @@ final class BugReportWindowController: NSWindowController, NSWindowDelegate, NST
         tv.backgroundColor = .textBackgroundColor
         tv.textColor = .textColor
         tv.insertionPointColor = .textColor
+        // `textColor` alone only affects existing characters; newly
+        // typed glyphs pick up `typingAttributes`, which otherwise
+        // defaults to black foreground and is invisible in dark mode.
+        tv.typingAttributes = [
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+            .foregroundColor: NSColor.textColor,
+        ]
         // Lightweight placeholder via accessibility hint (NSTextView has
         // no real placeholder API; intro label above sets expectation).
         tv.setAccessibilityPlaceholderValue(placeholder)

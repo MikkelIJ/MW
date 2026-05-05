@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.33 — 2026-05-05
+
+### Fixed
+- Characters typed into the **Report a Bug** description and steps
+  fields are now visible in dark mode. The previous fix only set the
+  text view's `textColor`, which is ignored for newly typed glyphs;
+  the typing attributes now use the system text color too.
+
 ## v0.7.32 — 2026-05-05
 
 ### Fixed
