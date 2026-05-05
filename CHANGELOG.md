@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.7.28 — 2026-05-05
+
+### Fixed
+- Pressing `⌘A` (or any other modifier-laden shortcut) no longer
+  freezes the keyboard. The drag-snap event tap was reading the
+  drag-state enum from a background thread while the main thread
+  mutated it, occasionally corrupting the read; macOS would then
+  time the tap callback out and disable it, dropping every event
+  until the app was restarted. The tap now only reads a single
+  lock-protected `Bool`, keeping all enum traffic on the main
+  thread, and never consumes events outside an active window drag.
+
 ## v0.7.27 — 2026-05-05
 
 ### Changed
