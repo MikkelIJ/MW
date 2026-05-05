@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.7.26 — 2026-05-05
+
+### Added
+- New **Report a Bug…** menu item opens a form where you describe the
+  problem, press **Start Recording** to capture debug logs while you
+  reproduce it, then **Send Bug Report** to open a prefilled GitHub
+  issue with the description, environment info, and the captured log
+  slice. Recording leaves your existing debug-logging preference
+  unchanged. If the captured log is too large to fit in the URL, the
+  full report is copied to your clipboard so you can paste it into
+  the issue body.
+
 ## v0.7.25 — 2026-05-05
 
 ### Added

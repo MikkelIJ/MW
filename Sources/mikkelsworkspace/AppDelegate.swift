@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var prefs: PreferencesWindowController?
     private var dragSnap: DragSnapMonitor?
     private var logWindow: LogWindowController?
+    private var bugReport: BugReportWindowController?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         ensureAccessibilityPermission()
@@ -107,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    keyEquivalent: "")
         debugItem.state = DebugLog.shared.enabled ? .on : .off
         menu.addItem(debugItem)
+        menu.addItem(withTitle: "Report a Bug…",
+                     action: #selector(reportBug), keyEquivalent: "")
 
         // Quit
         menu.addItem(.separator())
@@ -149,6 +152,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func hideLogWindow() {
         logWindow?.close()
         logWindow = nil
+    }
+
+    @objc private func reportBug() {
+        if bugReport == nil {
+            bugReport = BugReportWindowController()
+        }
+        bugReport?.show()
     }
 
     // MARK: - Hotkey
