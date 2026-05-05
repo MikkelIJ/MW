@@ -421,6 +421,9 @@ final class OverlayWindowController {
                     onPick(picked)
                 }
             )
+            view.onMouseEntered = { [weak self] in
+                self?.focusView(view)
+            }
             win.contentView = view
             win.setFrame(frame, display: true)
             win.makeKeyAndOrderFront(nil)
@@ -435,6 +438,20 @@ final class OverlayWindowController {
             onPick(nil)
             return
         }
+        // Initial focus: prefer the screen containing the target
+        // window's frame, falling back to the screen under the cursor.
+        let initialFocusScreen: NSRect = {
+            if let win = targetWindow, let frame = WindowMover.frame(of: win),
+               let s = NSScreen.screens.first(where: { $0.frame.intersects(frame) }) {
+                return s.visibleFrame
+            }
+            let cursor = NSEvent.mouseLocation
+            if let s = NSScreen.screens.first(where: { $0.frame.contains(cursor) }) {
+                return s.visibleFrame
+            }
+            return screens[0].visibleFrame
+        }()
+        for v in views { v.setFocusedDisplay(v.screenFrame == initialFocusScreen) }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -442,6 +459,11 @@ final class OverlayWindowController {
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
         views.removeAll()
+    }
+
+    /// Promote `target` to focused, dim every other display.
+    fileprivate func focusView(_ target: OverlayView) {
+        for v in views { v.setFocusedDisplay(v === target) }
     }
 
     /// True if any drag-mode overlay windows currently exist.
@@ -513,7 +535,9 @@ final class OverlayWindowController {
     /// (global Cocoa coordinates, e.g. from `NSEvent.mouseLocation`).
     func updateDragCursor(_ screenPoint: NSPoint) {
         for view in views {
-            guard view.screenFrame.contains(screenPoint) else {
+            let inside = view.screenFrame.contains(screenPoint)
+            view.setFocusedDisplay(inside)
+            guard inside else {
                 view.setExternalHover(localPoint: nil)
                 continue
             }
@@ -560,6 +584,19 @@ fileprivate final class OverlayView: NSView {
     /// set changes (i.e. cursor moved over a different stack of regions).
     private var hoverCycleOffset: Int = 0
     private var trackingArea: NSTrackingArea?
+    /// Is this the display the user is currently targeting? Non-focused
+    /// displays render with a darker tint so it's obvious which screen
+    /// the overlay is acting on.
+    private var isFocusedDisplay: Bool = true
+    /// Called by `OverlayView` on mouse-move in interactive mode so the
+    /// controller can promote this screen to focused and dim the rest.
+    fileprivate var onMouseEntered: (() -> Void)?
+
+    fileprivate func setFocusedDisplay(_ focused: Bool) {
+        guard focused != isFocusedDisplay else { return }
+        isFocusedDisplay = focused
+        needsDisplay = true
+    }
 
     /// Convenience: currently-selected hover index (after cycling), or nil.
     private var hover: Int? {
@@ -685,13 +722,19 @@ fileprivate final class OverlayView: NSView {
 
     override func draw(_ dirty: NSRect) {
         // Native-style overlay:
-        //   * Drag mode (non-interactive): no screen dim; regions appear
-        //     as soft white rounded rectangles, the hovered one bright
-        //     white with a subtle glow — mirroring macOS window-tiling.
+        //   * Drag mode (non-interactive): no screen dim on the focused
+        //     display; non-focused displays get a noticeable dim so the
+        //     user can see at a glance which screen the overlay targets.
         //   * Interactive mode: dim background so the user can spot
-        //     every zone, but use the same rounded white rendering.
+        //     every zone, with extra dim on non-focused displays.
+        let baseDim: CGFloat
         if interactive {
-            NSColor.black.withAlphaComponent(0.30).setFill()
+            baseDim = isFocusedDisplay ? 0.30 : 0.55
+        } else {
+            baseDim = isFocusedDisplay ? 0.0 : 0.45
+        }
+        if baseDim > 0 {
+            NSColor.black.withAlphaComponent(baseDim).setFill()
             bounds.fill()
         }
 
@@ -757,6 +800,7 @@ fileprivate final class OverlayView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         guard interactive else { return }
+        onMouseEntered?()
         let p = convert(event.locationInWindow, from: nil)
         let newCandidates = candidates(atLocal: p)
         if newCandidates != hoverCandidates {

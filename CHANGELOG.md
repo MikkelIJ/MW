@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.27 — 2026-05-05
+
+### Changed
+- Snap overlay now darkens every display that isn't the one you're
+  currently targeting, so on multi-monitor setups it's immediately
+  obvious which screen the snap will land on. Focus follows your
+  cursor in both drag-mode and the keyboard/click picker; in the
+  picker, focus starts on the screen that owns the active window.
+
 ## v0.7.26 — 2026-05-05
 
 ### Added
