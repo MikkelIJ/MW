@@ -32,9 +32,10 @@ final class DragSnapMonitor {
     private var rightClickThread: Thread?
     private var rightClickRunLoop: CFRunLoop?
 
-    /// Tracks Option-key state across `flagsChanged` events so we can
-    /// edge-detect press/release transitions during a drag.
-    fileprivate var optionDownDuringDrag: Bool = false
+    /// Tracks Control-key state across `flagsChanged` events so we can
+    /// edge-detect press/release transitions during a drag. (Option is
+    /// reserved by macOS 15+ for native window tiling, so we use ⌃.)
+    fileprivate var controlDownDuringDrag: Bool = false
 
     /// Pixels the mouse must travel after mouse-down before we treat
     /// the gesture as a drag (rather than an incidental click).
@@ -171,7 +172,7 @@ final class DragSnapMonitor {
                 break
             }
             state = .idle
-            optionDownDuringDrag = false
+            controlDownDuringDrag = false
 
         default:
             break
@@ -233,8 +234,8 @@ final class DragSnapMonitor {
                 if monitor.handleRightUpFromTap() { return nil }
             case .flagsChanged:
                 let flags = event.flags
-                let optionDown = flags.contains(.maskAlternate)
-                if monitor.handleOptionFromTap(down: optionDown) { return nil }
+                let controlDown = flags.contains(.maskControl)
+                if monitor.handleControlFromTap(down: controlDown) { return nil }
             default:
                 break
             }
@@ -322,27 +323,28 @@ final class DragSnapMonitor {
         // Intentionally empty.
     }
 
-    /// Option-key handler called from the CGEventTap thread. Trackpads
+    /// Control-key handler called from the CGEventTap thread. Trackpads
     /// don't deliver `rightMouseDown`/`rightMouseUp` while the user is
     /// holding a one-finger click-drag (the multitouch driver consumes
     /// extra fingers as continuations of the existing gesture), so the
-    /// Option key is offered as a parallel trigger that *does* reach
-    /// the event tap during a drag. The semantics mirror the right
-    /// button:
-    ///   • first Option-press during a drag → present overlay,
-    ///   • each subsequent Option-press → cycle to next region,
+    /// Control key is offered as a parallel trigger that *does* reach
+    /// the event tap during a drag. (Option is reserved by macOS 15+
+    /// for native window tiling, so we can't use ⌥.) The semantics
+    /// mirror the right button:
+    ///   • first Control-press during a drag → present overlay,
+    ///   • each subsequent Control-press → cycle to next region,
     ///   • releasing the left mouse while overlay is shown → snap.
     /// Returns true if the event was consumed (only when we actually
-    /// acted on it — outside a drag, Option must propagate normally).
-    fileprivate func handleOptionFromTap(down: Bool) -> Bool {
+    /// acted on it — outside a drag, Control must propagate normally).
+    fileprivate func handleControlFromTap(down: Bool) -> Bool {
         guard case .dragging = state else {
-            optionDownDuringDrag = false
+            controlDownDuringDrag = false
             return false
         }
         // Edge-detect: ignore unchanged states (flagsChanged fires for
         // every modifier toggle).
-        guard down != optionDownDuringDrag else { return false }
-        optionDownDuringDrag = down
+        guard down != controlDownDuringDrag else { return false }
+        controlDownDuringDrag = down
         let p = NSEvent.mouseLocation
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -350,9 +352,9 @@ final class DragSnapMonitor {
                 // Treat like a right-button release: present or cycle.
                 self.handleRightUpWhileDragging(at: p)
             }
-            // Releasing Option does nothing; the overlay stays up so
+            // Releasing Control does nothing; the overlay stays up so
             // the user can still drop into the highlighted region.
-            // (If we hid on release, the user would have to keep Option
+            // (If we hid on release, the user would have to keep ⌃
             // pressed for the whole drag, which is uncomfortable.)
         }
         return true

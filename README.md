@@ -52,9 +52,13 @@ The Windows build is **not** signed; SmartScreen may show a warning the first ti
 
 ## What it does
 - Lives in the menu bar (no Dock icon, no main window).
-- **Edit Regions for All Displays…** opens a translucent overlay; drag to draw rectangles, click an existing rectangle to delete, **Return** to save, **Esc** to cancel.
+- **Edit Regions for All Displays…** opens a translucent overlay; drag to draw rectangles, click an existing rectangle to delete, **Return** to save, **Esc** to cancel. Use **+** / **−** to adjust the grid size on the fly; the grid auto-fits each monitor as a perfect square cell sized from the main display.
 - Press the configured hotkey (default **⌥Space**) anywhere to bring up the picker; click a region and the focused window snaps into it.
-- Optional **instant snap** hotkeys jump the focused window straight to a numbered region without a picker.
+- Optional **instant snap** hotkeys jump the focused window straight to a numbered region without a picker. Region numbers are drawn inside each region in the editor and picker so you know which index is which.
+- **Drag-to-snap** — grab any window's title bar and start dragging, then trigger the snap overlay one of three ways:
+  - **Right-click** while dragging (mouse users). Each additional right-click cycles through overlapping regions under the cursor.
+  - **Control (⌃)** key while dragging (trackpad users — macOS suppresses two-finger secondary-click during a one-finger drag, and ⌥ is reserved by the system's native window tiling). Each additional ⌃ press cycles.
+  - Release the left mouse button while the overlay is up to drop the window into the highlighted region.
 - Per-display profiles — regions are remembered for each monitor and reapplied when it reconnects.
 - **About MW** menu item explains what the app is.
 
@@ -99,16 +103,4 @@ Once both workflows finish, the `install.sh` and `install.ps1` one-liners pick u
 - [install.sh](install.sh) / [install.ps1](install.ps1) — release installers.
 - [.github/workflows/](.github/workflows) — CI release pipelines.
 - [Package.swift](Package.swift) — SwiftPM manifest.
-- [tools/render-svg.swift](tools/render-svg.swift) — SVG → PNG rasterizer used by `build.sh`
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-Once the workflow finishes, the `install.sh` one-liner picks up the new version automatically.
-
-## Project layout
-- [Sources/mikkelsworkspace/](Sources/mikkelsworkspace) — Swift sources.
-- [build.sh](build.sh) — packaging script.
-- [install.sh](install.sh) — release installer.
-- [.github/workflows/release.yml](.github/workflows/release.yml) — release pipeline.
-- [Package.swift](Package.swift) — SwiftPM manifest.
+- [tools/render-svg.swift](tools/render-svg.swift) — SVG → PNG rasterizer used by `build.sh`.
