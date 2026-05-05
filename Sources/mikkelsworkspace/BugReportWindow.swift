@@ -125,6 +125,13 @@ final class BugReportWindowController: NSWindowController, NSWindowDelegate, NST
         tv.textContainerInset = NSSize(width: 4, height: 6)
         tv.delegate = self
         tv.string = ""
+        // Without these, the text view paints with the default (black)
+        // text on a transparent background, which is invisible against
+        // the bezel's dark fill in dark mode.
+        tv.drawsBackground = true
+        tv.backgroundColor = .textBackgroundColor
+        tv.textColor = .textColor
+        tv.insertionPointColor = .textColor
         // Lightweight placeholder via accessibility hint (NSTextView has
         // no real placeholder API; intro label above sets expectation).
         tv.setAccessibilityPlaceholderValue(placeholder)

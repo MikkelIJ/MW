@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.30 — 2026-05-05
+
+### Fixed
+- Text typed into the **Report a Bug** description and steps fields is
+  now visible in dark mode. The text view was painting black text on
+  a transparent background; it now uses the system text colors and
+  draws its own background.
+
 ## v0.7.29 — 2026-05-05
 
 ### Fixed
