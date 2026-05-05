@@ -283,7 +283,7 @@ final class DragSnapMonitor {
             }
             return Unmanaged.passUnretained(event)
         }
-        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap,
+        guard let tap = CGEvent.tapCreate(tap: .cghidEventTap,
                                           place: .headInsertEventTap,
                                           options: .defaultTap,
                                           eventsOfInterest: mask
