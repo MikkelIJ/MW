@@ -30,4 +30,12 @@ cask "mw" do
     "~/Library/Logs/MikkelsWorkspace.log",
     "~/Library/Preferences/local.mikkelsworkspace.plist",
   ]
+
+  # RELEASE_NOTES_BEGIN — auto-replaced by .github/workflows/release.yml
+  caveats <<~EOS
+    What's new in v#{version}:
+
+    See https://github.com/MikkelIJ/MW/releases/tag/v#{version}
+  EOS
+  # RELEASE_NOTES_END
 end

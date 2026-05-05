@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.25 — 2026-05-05
+
+### Added
+- `brew install --cask mw` and `brew upgrade --cask mw` now print the
+  release notes for the installed version as caveats, so you can see
+  what changed without leaving the terminal. The release pipeline
+  injects the matching `CHANGELOG.md` section into the cask on every
+  tagged release.
+
 ## v0.7.24 — 2026-05-05
 
 ### Added

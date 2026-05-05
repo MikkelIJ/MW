@@ -100,6 +100,43 @@ jobs:
             -e "s|^  version \".*\"|  version \"${VERSION}\"|" \
             -e "s|^  sha256 \"[a-f0-9]{64}\"|  sha256 \"${SHA256}\"|" \
             Casks/mw.rb
+
+          # Rewrite the RELEASE_NOTES block so `brew upgrade --cask mw`
+          # prints the curated changelog as caveats.
+          if [ -s /tmp/notes.md ]; then
+            {
+              echo "  # RELEASE_NOTES_BEGIN — auto-replaced by .github/workflows/release.yml"
+              echo "  caveats <<~EOS"
+              echo "    What's new in v#{version}:"
+              echo ""
+              # Indent each non-empty changelog line by 4 spaces so it
+              # nests correctly inside the heredoc. Strip blank lines
+              # at the very start/end. Escape any literal heredoc
+              # terminator just in case.
+              awk 'NF { found=1 } found' /tmp/notes.md \
+                | awk '{ lines[NR]=$0 } END { for (i=1;i<=NR;i++) if (i<NR || lines[i] != "") print lines[i] }' \
+                | sed -E 's/^/    /' \
+                | sed -E 's/^    EOS$/    EO_S/'
+              echo ""
+              echo "    Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}"
+              echo "  EOS"
+              echo "  # RELEASE_NOTES_END"
+            } > /tmp/release_notes_block.rb
+
+            /usr/bin/awk '
+              BEGIN { skip = 0 }
+              /^  # RELEASE_NOTES_BEGIN/ {
+                while ((getline line < "/tmp/release_notes_block.rb") > 0) print line
+                close("/tmp/release_notes_block.rb")
+                skip = 1
+                next
+              }
+              /^  # RELEASE_NOTES_END/ { skip = 0; next }
+              skip == 0 { print }
+            ' Casks/mw.rb > Casks/mw.rb.new
+            mv Casks/mw.rb.new Casks/mw.rb
+          fi
+
           # Only commit if something actually changed.
           if git diff --quiet Casks/mw.rb; then
             echo "Cask already up to date."
