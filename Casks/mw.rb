@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.24"
-  sha256 "6f3c14cbf02df0cd94114a13ad572e4a706c9eda36d7bab6b6795fd182245658"
+  version "0.7.25"
+  sha256 "434436d229f20908e8b54240ad7d707eac130735f4250862bf499aae2c21b6f1"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -35,7 +35,14 @@ cask "mw" do
   caveats <<~EOS
     What's new in v#{version}:
 
-    See https://github.com/MikkelIJ/MW/releases/tag/v#{version}
+    ### Added
+    - `brew install --cask mw` and `brew upgrade --cask mw` now print the
+      release notes for the installed version as caveats, so you can see
+      what changed without leaving the terminal. The release pipeline
+      injects the matching `CHANGELOG.md` section into the cask on every
+      tagged release.
+
+    Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
   # RELEASE_NOTES_END
 end
