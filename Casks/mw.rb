@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.28"
-  sha256 "60888caefbef7dfbf3327a177d5465d8bdabad4dc51d6563a0127bf5927e4c3e"
+  version "0.7.29"
+  sha256 "546b65360bda2d1a5898d16519ba70d22836e06595aec99207e155cef72d0b7d"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -36,14 +36,10 @@ cask "mw" do
     What's new in v#{version}:
 
     ### Fixed
-    - Pressing `⌘A` (or any other modifier-laden shortcut) no longer
-      freezes the keyboard. The drag-snap event tap was reading the
-      drag-state enum from a background thread while the main thread
-      mutated it, occasionally corrupting the read; macOS would then
-      time the tap callback out and disable it, dropping every event
-      until the app was restarted. The tap now only reads a single
-      lock-protected `Bool`, keeping all enum traffic on the main
-      thread, and never consumes events outside an active window drag.
+    - After granting Accessibility permission on first launch, drag-to-snap
+      starts working immediately — no app restart required. MW now polls
+      for the permission flip once a second and installs the event tap as
+      soon as it's allowed.
 
     Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
