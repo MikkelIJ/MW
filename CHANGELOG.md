@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.31 — 2026-05-05
+
+### Removed
+- The Windows (WPF / .NET 8) port has been dropped. MW is now
+  macOS-only. The `install.ps1` one-liner, the
+  `release-windows.yml` pipeline, and the `windows/` source tree
+  have been deleted; only `MW.zip` is published with each release.
+
 ## v0.7.30 — 2026-05-05
 
 ### Fixed

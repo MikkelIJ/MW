@@ -64,7 +64,6 @@ If you're about to push a `v*` tag, the changelog entry is mandatory.
 ## Other repo conventions
 
 - Swift sources live in [Sources/mikkelsworkspace/](../Sources/mikkelsworkspace).
-- Windows port lives in [windows/](../windows).
 - Build with `swift build` from the repo root before committing.
 - Casks/mw.rb is auto-bumped by the release pipeline — do not edit its
   `version`/`sha256` lines manually.

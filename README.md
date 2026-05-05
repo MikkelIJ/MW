@@ -1,8 +1,8 @@
 # MW — Mikkel's Workspace
 
-A tiny menu-bar / system-tray app for snapping windows into custom-drawn regions across one or more displays. Available for **macOS** (Swift / AppKit) and **Windows 11** (WPF / .NET 8).
+A tiny menu-bar app for snapping windows into custom-drawn regions across one or more displays. **macOS** only (Swift / AppKit).
 
-`MW` stands for **Mikkel's Workspace**. It was made out of need and curiosity about how to build an app like this — first for macOS, then ported to Windows.
+`MW` stands for **Mikkel's Workspace**. It was made out of need and curiosity about how to build an app like this for macOS.
 
 - Repository: <https://github.com/MikkelIJ/MW>
 - Releases: <https://github.com/MikkelIJ/MW/releases>
@@ -10,12 +10,6 @@ A tiny menu-bar / system-tray app for snapping windows into custom-drawn regions
 ## Install — macOS
 
 ### Homebrew (recommended)
-
-```sh
-brew install --cask MikkelIJ/mw/mw
-```
-
-If Homebrew can't find the tap automatically, add it once:
 
 ```sh
 brew tap MikkelIJ/mw https://github.com/MikkelIJ/MW.git
@@ -36,20 +30,6 @@ The installer downloads `MW.zip` from the latest GitHub release, verifies its SH
 
 On first launch macOS will prompt for **Accessibility** permission (System Settings → Privacy & Security → Accessibility) — required to move other apps' windows.
 
-## Install — Windows 11
-
-In an elevated-or-normal PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/MikkelIJ/MW/main/install.ps1 | iex
-```
-
-Pin a version: `$env:MW_VERSION='v0.2.0'; irm … | iex`. Change destination: `$env:MW_DEST="$env:LOCALAPPDATA\MW"; irm … | iex` (default).
-
-The installer downloads `MW-windows-x64.zip`, verifies its SHA-256, extracts to `%LOCALAPPDATA%\MW`, and creates a Start Menu shortcut. The published binary is a self-contained single-file `MW.exe` (no .NET install required).
-
-The Windows build is **not** signed; SmartScreen may show a warning the first time you run it.
-
 ## What it does
 - Lives in the menu bar (no Dock icon, no main window).
 - **Edit Regions for All Displays…** opens a translucent overlay; drag to draw rectangles, click an existing rectangle to delete, **Return** to save, **Esc** to cancel. Use **+** / **−** to adjust the grid size on the fly; the grid auto-fits each monitor as a perfect square cell sized from the main display.
@@ -66,7 +46,6 @@ Regions are stored at `~/Library/Application Support/mikkelsworkspace/regions.js
 
 ## Build from source
 
-### macOS
 Requires Xcode command-line tools (Swift 5.9+) on macOS 13+.
 
 ```sh
@@ -76,15 +55,7 @@ cd MW
 open build/mikkelsworkspace.app
 ```
 
-### Windows
-Requires the .NET 8 SDK on Windows 10/11.
-
-Two GitHub Actions workflows are triggered when a `v*` tag is pushed:
-
-- [.github/workflows/release.yml](.github/workflows/release.yml) — macOS build (`MW.zip` + `MW.zip.sha256`).
-- [.github/workflows/release-windows.yml](.github/workflows/release-windows.yml) — Windows build (`MW-windows-x64.zip` + `MW-windows-x64.zip.sha256`).
-
-Both upload to the same GitHub Release.
+[.github/workflows/release.yml](.github/workflows/release.yml) builds and publishes `MW.zip` + `MW.zip.sha256` to a GitHub Release whenever a `v*` tag is pushed.
 
 Cut a new release:
 
@@ -93,14 +64,12 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-Once both workflows finish, the `install.sh` and `install.ps1` one-liners pick up the new version automatically.
+Once the workflow finishes, the `install.sh` one-liner and the Homebrew cask pick up the new version automatically.
 
 ## Project layout
-- [Sources/mikkelsworkspace/](Sources/mikkelsworkspace) — macOS Swift sources (AppKit).
-- [windows/MW/](windows/MW) — Windows WPF / .NET 8 app.
-- [windows/MW.sln](windows/MW.sln) — Visual Studio solution.
+- [Sources/mikkelsworkspace/](Sources/mikkelsworkspace) — Swift sources (AppKit).
 - [build.sh](build.sh) — macOS packaging script.
-- [install.sh](install.sh) / [install.ps1](install.ps1) — release installers.
-- [.github/workflows/](.github/workflows) — CI release pipelines.
+- [install.sh](install.sh) — release installer.
+- [.github/workflows/](.github/workflows) — CI release pipeline.
 - [Package.swift](Package.swift) — SwiftPM manifest.
 - [tools/render-svg.swift](tools/render-svg.swift) — SVG → PNG rasterizer used by `build.sh`.
