@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.32"
-  sha256 "91fe83a61a44d824866e915af39218c6fb2299a996b2c7dc0b00028a6015cde4"
+  version "0.7.33"
+  sha256 "eb3245ac5582d8e8cc20db4c2b5b3beb7524f58d6c3216d98f840f74917960de"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -36,10 +36,10 @@ cask "mw" do
     What's new in v#{version}:
 
     ### Fixed
-    - Closing the **MW Debug Log** window with the red traffic-light
-      button now also clears the checkmark next to **Debug Logging** in
-      the menu bar and turns logging off, so the menu state matches
-      whether the log window is actually open.
+    - Characters typed into the **Report a Bug** description and steps
+      fields are now visible in dark mode. The previous fix only set the
+      text view's `textColor`, which is ignored for newly typed glyphs;
+      the typing attributes now use the system text color too.
 
     Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
