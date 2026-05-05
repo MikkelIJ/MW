@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.30"
-  sha256 "d49dac0f6a24570e6b2ed487942bd5dd88354abdb51f0e64893ac32a6a2bb9b6"
+  version "0.7.31"
+  sha256 "9b65e060777aaec9e7a2af7ee69f8a5a8bd1e34bb91831afced9cc248edfc0ac"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -35,11 +35,11 @@ cask "mw" do
   caveats <<~EOS
     What's new in v#{version}:
 
-    ### Fixed
-    - Text typed into the **Report a Bug** description and steps fields is
-      now visible in dark mode. The text view was painting black text on
-      a transparent background; it now uses the system text colors and
-      draws its own background.
+    ### Removed
+    - The Windows (WPF / .NET 8) port has been dropped. MW is now
+      macOS-only. The `install.ps1` one-liner, the
+      `release-windows.yml` pipeline, and the `windows/` source tree
+      have been deleted; only `MW.zip` is published with each release.
 
     Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
