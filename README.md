@@ -57,8 +57,7 @@ The Windows build is **not** signed; SmartScreen may show a warning the first ti
 - Optional **instant snap** hotkeys jump the focused window straight to a numbered region without a picker. Region numbers are drawn inside each region in the editor and picker so you know which index is which.
 - **Drag-to-snap** — grab any window's title bar and start dragging, then trigger the snap overlay one of these ways:
   - **Right-click** while dragging (mouse users). Each additional right-click cycles through overlapping regions under the cursor.
-  - **Two-finger swipe** while dragging (trackpad users). Each swipe cycles. *Two-finger tap does **not** work* — macOS's multitouch driver suppresses every multi-finger tap or click while a one-finger drag is in progress, at every layer accessible to apps.
-  - **Control (⌃)** as a keyboard fallback (Option ⌥ is reserved by macOS native window tiling).
+  - **Shift (⇧)** while dragging (trackpad users — macOS suppresses every multi-finger gesture during a one-finger drag at every layer accessible to apps; modifier keys are the only secondary input that survives, and ⌥ is reserved by macOS native window tiling). Each additional ⇧ press cycles.
   - Release the left mouse button while the overlay is up to drop the window into the highlighted region.
 - Per-display profiles — regions are remembered for each monitor and reapplied when it reconnects.
 - **About MW** menu item explains what the app is.

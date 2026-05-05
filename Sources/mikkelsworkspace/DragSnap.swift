@@ -4,39 +4,47 @@ import CoreGraphics
 
 /// Watches global mouse events. As soon as a window-titlebar drag is
 /// detected (left button held + focused window's frame moved), the
-/// snap-region overlay is shown. Releasing the left button over a
-/// region snaps the focused window into it.
+/// drag is "armed" — the user can then trigger the snap-region overlay
+/// in one of two ways:
 ///
-/// This unconditional approach is the only one that works: macOS's
-/// window-drag tracking runloop swallows every non-left-button mouse
-/// event and every `flagsChanged` event, so neither right-click,
-/// middle-click, nor any modifier key reach our NSEvent monitors. Only
-/// `leftMouseDragged`/`leftMouseUp` come through.
+///   • **Right-click** while dragging (mouse users). Each subsequent
+///     right-click cycles through overlapping regions under the cursor.
+///   • **Shift (⇧)** while dragging (trackpad users). Each subsequent
+///     Shift-press cycles. macOS's multitouch driver suppresses every
+///     multi-finger gesture (two-finger tap, three-finger tap, force
+///     touch, etc.) at *every* layer accessible to apps while a
+///     one-finger physical click is held — verified at both
+///     `.cgSessionEventTap` and `.cghidEventTap`. Modifier-key events
+///     are the only secondary input that survives that filter, and
+///     `Option` is reserved by macOS 15+ native window tiling, so we
+///     use Shift.
 ///
-/// Right-click cycling of overlapping regions is therefore handled via
-/// a low-level `CGEventTap`, which sees right-mouse-down events even
-/// while AppKit's window-drag loop is active.
+/// Releasing the left mouse button while the overlay is up snaps the
+/// focused window into the highlighted region. Releasing without ever
+/// triggering the overlay completes the drag normally.
+///
+/// Both `rightMouseDown` and `flagsChanged` are blocked from reaching
+/// `NSEvent` global monitors during AppKit's window-drag tracking
+/// loop, so we read them via a low-level `CGEventTap` hosted on a
+/// dedicated background thread (the main run loop is busy servicing
+/// the drag-tracking syscall and would starve the tap).
 final class DragSnapMonitor {
     private let store: RegionStore
     private let overlay: OverlayWindowController
 
     private var mouseGlobalMonitor: Any?
     private var mouseLocalMonitor: Any?
-    private var rightMouseGlobalMonitor: Any?
-    private var gestureGlobalMonitor: Any?
 
-    // Right-click event tap (for cycling overlapping regions while a
-    // window drag is in progress). Hosted on a dedicated background
-    // thread so AppKit's window-drag tracking loop can't starve it.
+    /// Background-thread CGEventTap that catches `rightMouseDown` and
+    /// `flagsChanged` events the main thread can't see during a drag.
     private var rightClickTap: CFMachPort?
     private var rightClickRunLoopSource: CFRunLoopSource?
     private var rightClickThread: Thread?
     private var rightClickRunLoop: CFRunLoop?
 
-    /// Tracks Control-key state across `flagsChanged` events so we can
-    /// edge-detect press/release transitions during a drag. (Option is
-    /// reserved by macOS 15+ for native window tiling, so we use ⌃.)
-    fileprivate var controlDownDuringDrag: Bool = false
+    /// Tracks Shift-key state across `flagsChanged` events so we can
+    /// edge-detect press/release transitions during a drag.
+    fileprivate var shiftDownDuringDrag: Bool = false
 
     /// Pixels the mouse must travel after mouse-down before we treat
     /// the gesture as a drag (rather than an incidental click).
@@ -48,11 +56,8 @@ final class DragSnapMonitor {
                        window: AXUIElement?,
                        initialFrame: NSRect?)
         /// Drag confirmed (window has moved past threshold). The
-        /// overlay isn't shown unless the user holds the right mouse
-        /// button. We always create the overlay on the first right-down
-        /// of a drag and keep its views alive for the whole drag — they
-        /// just toggle visibility on right-up / right-down so the
-        /// overlap-cycle index survives a momentary release.
+        /// overlay isn't shown until the user right-clicks or presses
+        /// Shift; `overlayPresented` flips on the first such trigger.
         case dragging(target: AXUIElement?, overlayPresented: Bool)
     }
     private var state: State = .idle
@@ -79,58 +84,16 @@ final class DragSnapMonitor {
                 return e
             }
         }
-        // NSEvent fallback for right-button handling. The CGEventTap
-        // is the primary path (it sees events first and lets us
-        // *consume* them so they don't pop a context menu), but on
-        // systems where the tap fails to install — e.g. Accessibility
-        // was reset by an upgrade and the user hasn't re-granted it —
-        // these NSEvent monitors still pick up right-button events
-        // delivered to other apps.
-        //
-        // Trackpad secondary-click (two-finger tap or bottom-right
-        // corner with macOS's "Secondary click" enabled) is delivered
-        // by the system as the same `rightMouseDown` / `rightMouseUp`
-        // events as a hardware right button, so this path covers
-        // trackpads too.
-        if rightMouseGlobalMonitor == nil {
-            rightMouseGlobalMonitor = NSEvent.addGlobalMonitorForEvents(
-                matching: [.rightMouseDown, .rightMouseUp]) { [weak self] e in
-                guard let self else { return }
-                if e.type == .rightMouseDown {
-                    self.handleRightDownWhileDragging()
-                } else if e.type == .rightMouseUp {
-                    self.handleRightUpWhileDragging(at: NSEvent.mouseLocation)
-                }
-            }
-        }
-        // Trackpad gesture events. macOS's multitouch driver suppresses
-        // `rightMouseDown` while a one-finger drag is in progress, but
-        // some gesture event types (begin/end/gesture/magnify/swipe/
-        // smartMagnify/pressure) sometimes still leak through. We log
-        // every one of them during a drag (so we can see in the
-        // DebugLog which actually fires for the user's two-finger tap)
-        // and treat any of them as an overlay trigger.
-        let gestureMask: NSEvent.EventTypeMask = [
-            .beginGesture, .endGesture, .gesture,
-            .magnify, .swipe, .smartMagnify, .pressure,
-        ]
-        if gestureGlobalMonitor == nil {
-            gestureGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: gestureMask) { [weak self] e in
-                self?.handleGestureEvent(e)
-            }
-        }
         installRightClickTap()
         DebugLog.shared.log("DragSnap.start: monitors installed")
     }
 
     func stop() {
-        for m in [mouseGlobalMonitor, mouseLocalMonitor, rightMouseGlobalMonitor, gestureGlobalMonitor] {
+        for m in [mouseGlobalMonitor, mouseLocalMonitor] {
             if let m { NSEvent.removeMonitor(m) }
         }
         mouseGlobalMonitor = nil
         mouseLocalMonitor = nil
-        rightMouseGlobalMonitor = nil
-        gestureGlobalMonitor = nil
         removeRightClickTap()
         if case .dragging(_, true) = state { overlay.dismiss() }
         state = .idle
@@ -165,7 +128,7 @@ final class DragSnapMonitor {
                     DebugLog.shared.log("  drag: window frame unchanged, not a window drag")
                     return
                 }
-                DebugLog.shared.log("  drag CONFIRMED: dist=\(Int(dist)) frame moved \(fmt(initial))→\(fmt(now)) → hold right mouse button to show overlay")
+                DebugLog.shared.log("  drag CONFIRMED: dist=\(Int(dist)) frame moved \(fmt(initial))→\(fmt(now)) → right-click or Shift to show overlay")
                 state = .dragging(target: win, overlayPresented: false)
             case .dragging(_, true):
                 overlay.updateDragCursor(p)
@@ -183,14 +146,12 @@ final class DragSnapMonitor {
                     _ = WindowMover.move(window: target, to: drop)
                 }
             case .dragging(_, false):
-                // User dragged but never showed the overlay (right
-                // button was never held): just let go, no snap.
                 DebugLog.shared.log("  leftUp: drag ended without overlay, ignoring")
             default:
                 break
             }
             state = .idle
-            controlDownDuringDrag = false
+            shiftDownDuringDrag = false
 
         default:
             break
@@ -220,31 +181,16 @@ final class DragSnapMonitor {
     private func fmt(_ p: NSPoint) -> String { "(\(Int(p.x)),\(Int(p.y)))" }
     private func fmt(_ r: NSRect) -> String { "(\(Int(r.origin.x)),\(Int(r.origin.y)) \(Int(r.size.width))x\(Int(r.size.height)))" }
 
-    // MARK: - Right-button overlay control (CGEventTap)
+    // MARK: - CGEventTap (right-click + Shift)
 
     private func installRightClickTap() {
         guard rightClickTap == nil else { return }
-        // Empirical finding (verified at both .cgSessionEventTap and
-        // .cghidEventTap layers with extensive logging): macOS's
-        // multitouch driver completely suppresses every multi-finger
-        // gesture — two-finger tap, two-finger click, three-finger
-        // tap, force touch — while a one-finger physical click is
-        // held. None of those reach *any* user-space API. The only
-        // multitouch event that survives mid-drag is `.scrollWheel`
-        // (continuous two-finger pan), so that's the trackpad's
-        // primary trigger here. We also listen for `flagsChanged`
-        // (Control-key fallback), `rightMouseDown` (mouse users), and
-        // `otherMouseDown` (extra mouse buttons).
         let mask = CGEventMask(1 << CGEventType.rightMouseDown.rawValue)
                  | CGEventMask(1 << CGEventType.rightMouseUp.rawValue)
                  | CGEventMask(1 << CGEventType.flagsChanged.rawValue)
-                 | CGEventMask(1 << CGEventType.scrollWheel.rawValue)
-                 | CGEventMask(1 << CGEventType.otherMouseDown.rawValue)
-                 | CGEventMask(1 << CGEventType.otherMouseUp.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let callback: CGEventTapCallBack = { _, type, event, refcon in
-            // The tap can be disabled by the system if it ever blocks
-            // for too long; re-enable on the spot.
+            // Re-enable on the spot if the system disabled the tap.
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                 if let refcon {
                     let monitor = Unmanaged<DragSnapMonitor>.fromOpaque(refcon).takeUnretainedValue()
@@ -256,33 +202,16 @@ final class DragSnapMonitor {
             }
             guard let refcon else { return Unmanaged.passUnretained(event) }
             let monitor = Unmanaged<DragSnapMonitor>.fromOpaque(refcon).takeUnretainedValue()
-            // Only intercept while we're actively dragging a window.
-            // Outside a drag, hand the event back so normal right-click
-            // context menus and modifier-key handling continue to work.
             switch type {
             case .rightMouseDown:
                 if monitor.handleRightDownFromTap() { return nil }
             case .rightMouseUp:
                 if monitor.handleRightUpFromTap() { return nil }
             case .flagsChanged:
-                let flags = event.flags
-                let controlDown = flags.contains(.maskControl)
-                if monitor.handleControlFromTap(down: controlDown) { return nil }
-            case .scrollWheel:
-                if monitor.handleScrollFromTap(event: event) { return nil }
-            case .otherMouseDown:
-                if monitor.handleOtherMouseDownFromTap() { return nil }
-            case .otherMouseUp:
-                // Always consume the matching up so the underlying app
-                // doesn't see a stray button-up in isolation.
-                if case .dragging = monitor.state { return nil }
+                let shiftDown = event.flags.contains(.maskShift)
+                if monitor.handleShiftFromTap(down: shiftDown) { return nil }
             default:
-                // Log unexpected types so we can extend coverage.
-                if case .dragging = monitor.state {
-                    DispatchQueue.main.async {
-                        DebugLog.shared.log("  tap: unexpected event type=\(type.rawValue) during drag")
-                    }
-                }
+                break
             }
             return Unmanaged.passUnretained(event)
         }
@@ -294,15 +223,13 @@ final class DragSnapMonitor {
                                               | CGEventMask(1 << CGEventType.tapDisabledByUserInput.rawValue),
                                           callback: callback,
                                           userInfo: refcon) else {
-            NSLog("MW: CGEvent.tapCreate failed — right-button overlay control will fall back to NSEvent monitor (works only outside the dragged window's own app).")
+            NSLog("MW: CGEvent.tapCreate failed — drag-snap overlay triggers won't work mid-drag (Accessibility permission?).")
             DebugLog.shared.log("DragSnap.installRightClickTap: tapCreate failed (no Accessibility?)")
             return
         }
         rightClickTap = tap
-        // Run the tap on its own dedicated thread so AppKit's
-        // window-drag tracking loop on the main thread can never starve
-        // it. Without this, right-clicks issued mid-drag arrive *after*
-        // the user has already released the left button.
+        // Run the tap on a dedicated thread so AppKit's window-drag
+        // tracking loop on the main thread can never starve it.
         let thread = Thread { [weak self] in
             guard let self else { return }
             let runLoop = CFRunLoopGetCurrent()
@@ -311,7 +238,6 @@ final class DragSnapMonitor {
             self.rightClickRunLoopSource = source
             CFRunLoopAddSource(runLoop, source, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
-            // Park here forever; CFRunLoopStop is called from `stop()`.
             while !Thread.current.isCancelled {
                 CFRunLoopRunInMode(.defaultMode, 1.0, false)
             }
@@ -341,13 +267,8 @@ final class DragSnapMonitor {
     /// Returns true if the event was consumed.
     fileprivate func handleRightDownFromTap() -> Bool {
         guard case .dragging = state else { return false }
-        // Consume the event so it doesn't reach the underlying app
-        // (which would otherwise pop a context menu). The actual
-        // overlay action runs on right-up so the user gets standard
-        // click feedback (press, release, then UI reacts).
-        DispatchQueue.main.async { [weak self] in
-            self?.handleRightDownWhileDragging()
-        }
+        // Consume so the underlying app doesn't get a context menu.
+        // The visible action runs on right-up for normal click feel.
         return true
     }
 
@@ -356,151 +277,46 @@ final class DragSnapMonitor {
         guard case .dragging = state else { return false }
         let p = NSEvent.mouseLocation
         DispatchQueue.main.async { [weak self] in
-            self?.handleRightUpWhileDragging(at: p)
+            self?.presentOrCycle(at: p)
         }
         return true
     }
 
-    /// Right-button-down during a drag: no-op aside from being marked
-    /// as consumed (which the tap callback handles). The visible action
-    /// happens on right-up so the gesture behaves like a normal click.
-    private func handleRightDownWhileDragging() {
-        // Intentionally empty.
-    }
-
-    /// Trackpad gesture event from the global NSEvent monitor. We
-    /// always log it (so the user's DebugLog reveals exactly which
-    /// gesture type their two-finger tap produces during a drag), and
-    /// if a drag is in progress we treat any gesture as a present-or-
-    /// cycle trigger \u2014 this is the trackpad's primary path.
-    private func handleGestureEvent(_ event: NSEvent) {
-        let name = gestureEventName(event.type)
-        DebugLog.shared.log("evt \(name) src=global loc=\(fmt(NSEvent.mouseLocation)) state=\(stateName())")
-        guard case .dragging = state else { return }
-        // Some gesture types fire continuously (e.g. .magnify, .gesture
-        // with phase=changed). Only act on the *first* one of each
-        // gesture sequence, which we approximate by reacting only to
-        // begin-style events plus standalone discrete gestures.
-        switch event.type {
-        case .beginGesture, .smartMagnify, .swipe:
-            handleRightUpWhileDragging(at: NSEvent.mouseLocation)
-        case .pressure:
-            // Pressure begins at stage 1 (light press); only trigger
-            // on the transition into stage \u2265 1 to avoid storms.
-            if event.stage >= 1 {
-                handleRightUpWhileDragging(at: NSEvent.mouseLocation)
-            }
-        case .gesture, .magnify, .endGesture:
-            // Don't trigger here \u2014 begin/swipe/smartMagnify already
-            // covered the start; .gesture/.magnify fire repeatedly,
-            // and .endGesture would re-trigger after we already showed.
-            break
-        default:
-            break
-        }
-    }
-
-    private func gestureEventName(_ t: NSEvent.EventType) -> String {
-        switch t {
-        case .beginGesture: return "beginGesture"
-        case .endGesture: return "endGesture"
-        case .gesture: return "gesture"
-        case .magnify: return "magnify"
-        case .swipe: return "swipe"
-        case .smartMagnify: return "smartMagnify"
-        case .pressure: return "pressure"
-        default: return "gesture(\(t.rawValue))"
-        }
-    }
-
-    /// Scroll-wheel handler from the CGEventTap. A two-finger
-    /// scroll/swipe on a trackpad reliably generates `.scrollWheel`
-    /// events even while a one-finger drag is in progress (it's the
-    /// only multi-touch event type that does). We use the very first
-    /// scroll event during a drag as the overlay trigger; further
-    /// scroll events cycle through overlapping regions.
-    fileprivate func handleScrollFromTap(event: CGEvent) -> Bool {
-        guard case .dragging = state else { return false }
-        let dy = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
-        let dx = event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
-        let p = NSEvent.mouseLocation
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            DebugLog.shared.log("  scrollWheel during drag dx=\(dx) dy=\(dy)")
-            self.handleRightUpWhileDragging(at: p)
-        }
-        return true
-    }
-
-    /// Extra-mouse-button (e.g. mouse4/5) handler. Treated like a
-    /// secondary trigger so users with multi-button mice have an
-    /// alternative to right-click.
-    fileprivate func handleOtherMouseDownFromTap() -> Bool {
-        guard case .dragging = state else { return false }
-        let p = NSEvent.mouseLocation
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            DebugLog.shared.log("  otherMouseDown during drag")
-            self.handleRightUpWhileDragging(at: p)
-        }
-        return true
-    }
-
-    /// Control-key handler called from the CGEventTap thread. Trackpads
-    /// don't deliver `rightMouseDown`/`rightMouseUp` while the user is
-    /// holding a one-finger click-drag (the multitouch driver consumes
-    /// extra fingers as continuations of the existing gesture), so the
-    /// Control key is offered as a parallel trigger that *does* reach
-    /// the event tap during a drag. (Option is reserved by macOS 15+
-    /// for native window tiling, so we can't use ⌥.) The semantics
-    /// mirror the right button:
-    ///   • first Control-press during a drag → present overlay,
-    ///   • each subsequent Control-press → cycle to next region,
-    ///   • releasing the left mouse while overlay is shown → snap.
-    /// Returns true if the event was consumed (only when we actually
-    /// acted on it — outside a drag, Control must propagate normally).
-    fileprivate func handleControlFromTap(down: Bool) -> Bool {
+    /// Shift-key handler called from the CGEventTap thread. First
+    /// Shift-press during a drag presents the overlay; each subsequent
+    /// press cycles to the next overlapping region under the cursor.
+    /// Shift-release does nothing — the overlay stays up so the user
+    /// can drop into the highlighted region without holding Shift.
+    /// Outside a drag we don't consume the event (Shift must reach
+    /// other apps normally).
+    fileprivate func handleShiftFromTap(down: Bool) -> Bool {
         guard case .dragging = state else {
-            controlDownDuringDrag = false
+            shiftDownDuringDrag = false
             return false
         }
-        // Edge-detect: ignore unchanged states (flagsChanged fires for
-        // every modifier toggle).
-        guard down != controlDownDuringDrag else { return false }
-        controlDownDuringDrag = down
+        // Edge-detect: flagsChanged fires for every modifier toggle.
+        guard down != shiftDownDuringDrag else { return false }
+        shiftDownDuringDrag = down
+        guard down else { return true }   // consume the release silently
         let p = NSEvent.mouseLocation
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            if down {
-                // Treat like a right-button release: present or cycle.
-                self.handleRightUpWhileDragging(at: p)
-            }
-            // Releasing Control does nothing; the overlay stays up so
-            // the user can still drop into the highlighted region.
-            // (If we hid on release, the user would have to keep ⌃
-            // pressed for the whole drag, which is uncomfortable.)
+            self?.presentOrCycle(at: p)
         }
         return true
     }
 
-    /// Right-button-up during a drag drives the overlay:
-    ///   • first click of the drag → present the overlay (highlight
-    ///     the topmost region under the cursor),
-    ///   • each subsequent click → cycle to the next overlapping region
-    ///     under the cursor.
-    /// Releasing the left button while the overlay is shown snaps the
-    /// window into the highlighted region. Releasing the left button
-    /// without ever clicking right just completes the drag normally.
-    private func handleRightUpWhileDragging(at point: NSPoint) {
+    /// First trigger during a drag presents the overlay; each
+    /// subsequent trigger cycles to the next overlapping region.
+    private func presentOrCycle(at point: NSPoint) {
         switch state {
         case .dragging(let target, false):
             overlay.presentForDrag()
             overlay.updateDragCursor(point)
             state = .dragging(target: target, overlayPresented: true)
-            DebugLog.shared.log("  rightUp: overlay shown at \(fmt(point))")
+            DebugLog.shared.log("  trigger: overlay shown at \(fmt(point))")
         case .dragging(_, true):
             let cycled = overlay.cycleHover(at: point)
-            DebugLog.shared.log("  rightUp: cycled overlapping region (cycled=\(cycled))")
+            DebugLog.shared.log("  trigger: cycled overlapping region (cycled=\(cycled))")
         default:
             break
         }
