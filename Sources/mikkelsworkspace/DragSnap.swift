@@ -224,14 +224,17 @@ final class DragSnapMonitor {
 
     private func installRightClickTap() {
         guard rightClickTap == nil else { return }
-        // We listen for a wide range of event types so that *any*
-        // secondary input the user makes during a one-finger drag can
-        // trigger the overlay. macOS's multitouch driver is known to
-        // suppress `rightMouseDown` and `flagsChanged` while a
-        // one-finger click-drag is in progress, so we cast a wide net
-        // — scrollWheel (two-finger scroll), otherMouseDown (extra
-        // mouse buttons), and tabletPointer — and let the handler
-        // decide what counts as a trigger.
+        // Empirical finding (verified at both .cgSessionEventTap and
+        // .cghidEventTap layers with extensive logging): macOS's
+        // multitouch driver completely suppresses every multi-finger
+        // gesture — two-finger tap, two-finger click, three-finger
+        // tap, force touch — while a one-finger physical click is
+        // held. None of those reach *any* user-space API. The only
+        // multitouch event that survives mid-drag is `.scrollWheel`
+        // (continuous two-finger pan), so that's the trackpad's
+        // primary trigger here. We also listen for `flagsChanged`
+        // (Control-key fallback), `rightMouseDown` (mouse users), and
+        // `otherMouseDown` (extra mouse buttons).
         let mask = CGEventMask(1 << CGEventType.rightMouseDown.rawValue)
                  | CGEventMask(1 << CGEventType.rightMouseUp.rawValue)
                  | CGEventMask(1 << CGEventType.flagsChanged.rawValue)
@@ -283,7 +286,7 @@ final class DragSnapMonitor {
             }
             return Unmanaged.passUnretained(event)
         }
-        guard let tap = CGEvent.tapCreate(tap: .cghidEventTap,
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap,
                                           place: .headInsertEventTap,
                                           options: .defaultTap,
                                           eventsOfInterest: mask
