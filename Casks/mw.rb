@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.23"
-  sha256 "7dd37a12d53cc5e1fcefc3febe1aff4d19fe76db00842e9f94276d1f61c55042"
+  version "0.7.24"
+  sha256 "6f3c14cbf02df0cd94114a13ad572e4a706c9eda36d7bab6b6795fd182245658"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
