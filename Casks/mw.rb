@@ -1,8 +1,8 @@
 cask "mw" do
-  version :latest
-  sha256 :no_check
+  version "0.7.23"
+  sha256 "7dd37a12d53cc5e1fcefc3febe1aff4d19fe76db00842e9f94276d1f61c55042"
 
-  url "https://github.com/MikkelIJ/MW/releases/latest/download/MW.zip"
+  url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
   desc "Menu-bar utility to snap windows into user-drawn regions"
   homepage "https://github.com/MikkelIJ/MW"

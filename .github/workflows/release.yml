@@ -59,3 +59,27 @@ jobs:
           files: |
             build/MW.zip
             build/MW.zip.sha256
+
+      - name: Bump Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          SHA256="$(awk '{print $1}' build/MW.zip.sha256)"
+          # Replace the version + sha256 lines in the cask. Match the
+          # leading two-space indent so we don't touch anything else.
+          /usr/bin/sed -i '' -E \
+            -e "s|^  version \".*\"|  version \"${VERSION}\"|" \
+            -e "s|^  sha256 \"[a-f0-9]{64}\"|  sha256 \"${SHA256}\"|" \
+            Casks/mw.rb
+          # Only commit if something actually changed.
+          if git diff --quiet Casks/mw.rb; then
+            echo "Cask already up to date."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/mw.rb
+          git commit -m "Casks: bump mw to ${VERSION}"
+          git push origin HEAD:main
