@@ -23,6 +23,7 @@ final class DragSnapMonitor {
     private var mouseGlobalMonitor: Any?
     private var mouseLocalMonitor: Any?
     private var rightMouseGlobalMonitor: Any?
+    private var gestureGlobalMonitor: Any?
 
     // Right-click event tap (for cycling overlapping regions while a
     // window drag is in progress). Hosted on a dedicated background
@@ -102,17 +103,34 @@ final class DragSnapMonitor {
                 }
             }
         }
+        // Trackpad gesture events. macOS's multitouch driver suppresses
+        // `rightMouseDown` while a one-finger drag is in progress, but
+        // some gesture event types (begin/end/gesture/magnify/swipe/
+        // smartMagnify/pressure) sometimes still leak through. We log
+        // every one of them during a drag (so we can see in the
+        // DebugLog which actually fires for the user's two-finger tap)
+        // and treat any of them as an overlay trigger.
+        let gestureMask: NSEvent.EventTypeMask = [
+            .beginGesture, .endGesture, .gesture,
+            .magnify, .swipe, .smartMagnify, .pressure,
+        ]
+        if gestureGlobalMonitor == nil {
+            gestureGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: gestureMask) { [weak self] e in
+                self?.handleGestureEvent(e)
+            }
+        }
         installRightClickTap()
         DebugLog.shared.log("DragSnap.start: monitors installed")
     }
 
     func stop() {
-        for m in [mouseGlobalMonitor, mouseLocalMonitor, rightMouseGlobalMonitor] {
+        for m in [mouseGlobalMonitor, mouseLocalMonitor, rightMouseGlobalMonitor, gestureGlobalMonitor] {
             if let m { NSEvent.removeMonitor(m) }
         }
         mouseGlobalMonitor = nil
         mouseLocalMonitor = nil
         rightMouseGlobalMonitor = nil
+        gestureGlobalMonitor = nil
         removeRightClickTap()
         if case .dragging(_, true) = state { overlay.dismiss() }
         state = .idle
@@ -206,9 +224,20 @@ final class DragSnapMonitor {
 
     private func installRightClickTap() {
         guard rightClickTap == nil else { return }
+        // We listen for a wide range of event types so that *any*
+        // secondary input the user makes during a one-finger drag can
+        // trigger the overlay. macOS's multitouch driver is known to
+        // suppress `rightMouseDown` and `flagsChanged` while a
+        // one-finger click-drag is in progress, so we cast a wide net
+        // — scrollWheel (two-finger scroll), otherMouseDown (extra
+        // mouse buttons), and tabletPointer — and let the handler
+        // decide what counts as a trigger.
         let mask = CGEventMask(1 << CGEventType.rightMouseDown.rawValue)
                  | CGEventMask(1 << CGEventType.rightMouseUp.rawValue)
                  | CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+                 | CGEventMask(1 << CGEventType.scrollWheel.rawValue)
+                 | CGEventMask(1 << CGEventType.otherMouseDown.rawValue)
+                 | CGEventMask(1 << CGEventType.otherMouseUp.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             // The tap can be disabled by the system if it ever blocks
@@ -236,8 +265,21 @@ final class DragSnapMonitor {
                 let flags = event.flags
                 let controlDown = flags.contains(.maskControl)
                 if monitor.handleControlFromTap(down: controlDown) { return nil }
+            case .scrollWheel:
+                if monitor.handleScrollFromTap(event: event) { return nil }
+            case .otherMouseDown:
+                if monitor.handleOtherMouseDownFromTap() { return nil }
+            case .otherMouseUp:
+                // Always consume the matching up so the underlying app
+                // doesn't see a stray button-up in isolation.
+                if case .dragging = monitor.state { return nil }
             default:
-                break
+                // Log unexpected types so we can extend coverage.
+                if case .dragging = monitor.state {
+                    DispatchQueue.main.async {
+                        DebugLog.shared.log("  tap: unexpected event type=\(type.rawValue) during drag")
+                    }
+                }
             }
             return Unmanaged.passUnretained(event)
         }
@@ -321,6 +363,84 @@ final class DragSnapMonitor {
     /// happens on right-up so the gesture behaves like a normal click.
     private func handleRightDownWhileDragging() {
         // Intentionally empty.
+    }
+
+    /// Trackpad gesture event from the global NSEvent monitor. We
+    /// always log it (so the user's DebugLog reveals exactly which
+    /// gesture type their two-finger tap produces during a drag), and
+    /// if a drag is in progress we treat any gesture as a present-or-
+    /// cycle trigger \u2014 this is the trackpad's primary path.
+    private func handleGestureEvent(_ event: NSEvent) {
+        let name = gestureEventName(event.type)
+        DebugLog.shared.log("evt \(name) src=global loc=\(fmt(NSEvent.mouseLocation)) state=\(stateName())")
+        guard case .dragging = state else { return }
+        // Some gesture types fire continuously (e.g. .magnify, .gesture
+        // with phase=changed). Only act on the *first* one of each
+        // gesture sequence, which we approximate by reacting only to
+        // begin-style events plus standalone discrete gestures.
+        switch event.type {
+        case .beginGesture, .smartMagnify, .swipe:
+            handleRightUpWhileDragging(at: NSEvent.mouseLocation)
+        case .pressure:
+            // Pressure begins at stage 1 (light press); only trigger
+            // on the transition into stage \u2265 1 to avoid storms.
+            if event.stage >= 1 {
+                handleRightUpWhileDragging(at: NSEvent.mouseLocation)
+            }
+        case .gesture, .magnify, .endGesture:
+            // Don't trigger here \u2014 begin/swipe/smartMagnify already
+            // covered the start; .gesture/.magnify fire repeatedly,
+            // and .endGesture would re-trigger after we already showed.
+            break
+        default:
+            break
+        }
+    }
+
+    private func gestureEventName(_ t: NSEvent.EventType) -> String {
+        switch t {
+        case .beginGesture: return "beginGesture"
+        case .endGesture: return "endGesture"
+        case .gesture: return "gesture"
+        case .magnify: return "magnify"
+        case .swipe: return "swipe"
+        case .smartMagnify: return "smartMagnify"
+        case .pressure: return "pressure"
+        default: return "gesture(\(t.rawValue))"
+        }
+    }
+
+    /// Scroll-wheel handler from the CGEventTap. A two-finger
+    /// scroll/swipe on a trackpad reliably generates `.scrollWheel`
+    /// events even while a one-finger drag is in progress (it's the
+    /// only multi-touch event type that does). We use the very first
+    /// scroll event during a drag as the overlay trigger; further
+    /// scroll events cycle through overlapping regions.
+    fileprivate func handleScrollFromTap(event: CGEvent) -> Bool {
+        guard case .dragging = state else { return false }
+        let dy = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+        let dx = event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
+        let p = NSEvent.mouseLocation
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            DebugLog.shared.log("  scrollWheel during drag dx=\(dx) dy=\(dy)")
+            self.handleRightUpWhileDragging(at: p)
+        }
+        return true
+    }
+
+    /// Extra-mouse-button (e.g. mouse4/5) handler. Treated like a
+    /// secondary trigger so users with multi-button mice have an
+    /// alternative to right-click.
+    fileprivate func handleOtherMouseDownFromTap() -> Bool {
+        guard case .dragging = state else { return false }
+        let p = NSEvent.mouseLocation
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            DebugLog.shared.log("  otherMouseDown during drag")
+            self.handleRightUpWhileDragging(at: p)
+        }
+        return true
     }
 
     /// Control-key handler called from the CGEventTap thread. Trackpads
