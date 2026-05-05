@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.29"
-  sha256 "546b65360bda2d1a5898d16519ba70d22836e06595aec99207e155cef72d0b7d"
+  version "0.7.30"
+  sha256 "d49dac0f6a24570e6b2ed487942bd5dd88354abdb51f0e64893ac32a6a2bb9b6"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -36,10 +36,10 @@ cask "mw" do
     What's new in v#{version}:
 
     ### Fixed
-    - After granting Accessibility permission on first launch, drag-to-snap
-      starts working immediately — no app restart required. MW now polls
-      for the permission flip once a second and installs the event tap as
-      soon as it's allowed.
+    - Text typed into the **Report a Bug** description and steps fields is
+      now visible in dark mode. The text view was painting black text on
+      a transparent background; it now uses the system text colors and
+      draws its own background.
 
     Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
