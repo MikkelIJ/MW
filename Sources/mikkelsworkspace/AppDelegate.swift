@@ -15,6 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dragSnap: DragSnapMonitor?
     private var logWindow: LogWindowController?
     private var bugReport: BugReportWindowController?
+    /// Polls Accessibility-trust state so MW can wire up
+    /// AX-dependent features (drag-snap event tap, window mover)
+    /// the moment the user grants permission — no restart needed.
+    private var accessibilityTrustTimer: Timer?
+    private var lastAccessibilityTrust = false
 
     func applicationDidFinishLaunching(_ note: Notification) {
         ensureAccessibilityPermission()
@@ -397,6 +402,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Drag-snap
     private func setupDragSnap() {
         if overlay == nil { overlay = OverlayWindowController(store: store) }
+        // Defer starting the event tap until Accessibility is granted;
+        // CGEvent.tapCreate silently returns nil without it.
+        guard AXIsProcessTrusted() else { return }
         let monitor = DragSnapMonitor(store: store, overlay: overlay!)
         monitor.start()
         dragSnap = monitor
@@ -405,6 +413,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Accessibility prompt
     private func ensureAccessibilityPermission() {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(opts)
+        lastAccessibilityTrust = AXIsProcessTrustedWithOptions(opts)
+        // macOS doesn't post a reliable system notification when
+        // Accessibility is granted to a freshly-prompted process, so
+        // poll for the transition and wire up AX-dependent features
+        // as soon as it flips. 1 s is fast enough to feel instant
+        // without measurable battery cost.
+        if !lastAccessibilityTrust {
+            accessibilityTrustTimer = Timer.scheduledTimer(
+                withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                self?.checkAccessibilityTrust()
+            }
+        }
+    }
+
+    private func checkAccessibilityTrust() {
+        let trusted = AXIsProcessTrusted()
+        guard trusted, !lastAccessibilityTrust else { return }
+        lastAccessibilityTrust = true
+        accessibilityTrustTimer?.invalidate()
+        accessibilityTrustTimer = nil
+        // Now safe to install the drag-snap event tap.
+        if dragSnap == nil { setupDragSnap() }
     }
 }

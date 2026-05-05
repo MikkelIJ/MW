@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.29 — 2026-05-05
+
+### Fixed
+- After granting Accessibility permission on first launch, drag-to-snap
+  starts working immediately — no app restart required. MW now polls
+  for the permission flip once a second and installs the event tap as
+  soon as it's allowed.
+
 ## v0.7.28 — 2026-05-05
 
 ### Fixed
