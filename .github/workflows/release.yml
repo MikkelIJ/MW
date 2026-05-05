@@ -50,12 +50,39 @@ jobs:
           ditto -c -k --keepParent MW.app MW.zip
           shasum -a 256 MW.zip > MW.zip.sha256
 
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          if [ ! -f CHANGELOG.md ]; then
+            echo "No CHANGELOG.md found; falling back to auto-generated notes."
+            echo "have_notes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Pull lines from "## <TAG>" up to (but not including) the
+          # next "## " header. Tolerate trailing date suffix.
+          awk -v tag="$TAG" '
+            $0 ~ "^## "tag"( |$)" {flag=1; next}
+            flag && /^## / {exit}
+            flag {print}
+          ' CHANGELOG.md > /tmp/notes.md
+          if [ -s /tmp/notes.md ]; then
+            echo "have_notes=true" >> "$GITHUB_OUTPUT"
+            echo "Extracted notes:"
+            cat /tmp/notes.md
+          else
+            echo "No CHANGELOG entry for $TAG; falling back to auto-generated notes."
+            echo "have_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: ${{ steps.ver.outputs.tag }}
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.have_notes == 'true' && '/tmp/notes.md' || '' }}
+          generate_release_notes: ${{ steps.notes.outputs.have_notes != 'true' }}
           files: |
             build/MW.zip
             build/MW.zip.sha256
