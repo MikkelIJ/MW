@@ -12,6 +12,11 @@ final class LogWindowController: NSWindowController, NSWindowDelegate {
     private var offset: UInt64 = 0
     private var followTail: Bool = true
 
+    /// Invoked when the user closes the window directly (e.g. red
+    /// traffic-light button). Lets the owner sync UI state such as
+    /// the menu bar checkmark on the **Debug Logging** item.
+    var onUserClose: (() -> Void)?
+
     init(logURL: URL) {
         self.logURL = logURL
 
@@ -139,5 +144,6 @@ final class LogWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         stopWatching()
+        onUserClose?()
     }
 }

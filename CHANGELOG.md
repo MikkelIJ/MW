@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.32 — 2026-05-05
+
+### Fixed
+- Closing the **MW Debug Log** window with the red traffic-light
+  button now also clears the checkmark next to **Debug Logging** in
+  the menu bar and turns logging off, so the menu state matches
+  whether the log window is actually open.
+
 ## v0.7.31 — 2026-05-05
 
 ### Removed

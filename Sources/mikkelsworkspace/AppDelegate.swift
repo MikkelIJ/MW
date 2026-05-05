@@ -147,7 +147,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Terminal.app window without AppleScript automation permission.
     private func showLogWindow() {
         if logWindow == nil {
-            logWindow = LogWindowController(logURL: DebugLog.shared.logFileURL)
+            let controller = LogWindowController(logURL: DebugLog.shared.logFileURL)
+            controller.onUserClose = { [weak self] in
+                self?.handleLogWindowClosedByUser()
+            }
+            logWindow = controller
         }
         logWindow?.showWindow(nil)
         logWindow?.window?.makeKeyAndOrderFront(nil)
@@ -155,8 +159,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func hideLogWindow() {
+        logWindow?.onUserClose = nil
         logWindow?.close()
         logWindow = nil
+    }
+
+    /// Called when the user closes the log window with the red
+    /// traffic-light button. Treats it as turning debug logging off so
+    /// the menu bar checkmark stays in sync with reality.
+    private func handleLogWindowClosedByUser() {
+        logWindow = nil
+        if DebugLog.shared.enabled {
+            DebugLog.shared.log("--- debug logging DISABLED (window closed) ---")
+            DebugLog.shared.enabled = false
+        }
+        buildMenu()
     }
 
     @objc private func reportBug() {
