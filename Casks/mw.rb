@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.27"
-  sha256 "c1b0b25b4dcd880b77c4cfe65e2d8040b4ea43cbb65337eb33fc3d078002e01a"
+  version "0.7.28"
+  sha256 "60888caefbef7dfbf3327a177d5465d8bdabad4dc51d6563a0127bf5927e4c3e"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -35,12 +35,15 @@ cask "mw" do
   caveats <<~EOS
     What's new in v#{version}:
 
-    ### Changed
-    - Snap overlay now darkens every display that isn't the one you're
-      currently targeting, so on multi-monitor setups it's immediately
-      obvious which screen the snap will land on. Focus follows your
-      cursor in both drag-mode and the keyboard/click picker; in the
-      picker, focus starts on the screen that owns the active window.
+    ### Fixed
+    - Pressing `⌘A` (or any other modifier-laden shortcut) no longer
+      freezes the keyboard. The drag-snap event tap was reading the
+      drag-state enum from a background thread while the main thread
+      mutated it, occasionally corrupting the read; macOS would then
+      time the tap callback out and disable it, dropping every event
+      until the app was restarted. The tap now only reads a single
+      lock-protected `Bool`, keeping all enum traffic on the main
+      thread, and never consumes events outside an active window drag.
 
     Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
