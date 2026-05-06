@@ -139,6 +139,22 @@ final class BugReportWindowController: NSWindowController, NSWindowDelegate, NST
             .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
             .foregroundColor: NSColor.textColor,
         ]
+        // A bare `NSTextView()` ends up with a zero-sized text
+        // container inside a scroll view, which makes typed glyphs lay
+        // out off-screen (the caret blinks but no characters appear).
+        // Mirror the standard scroll-view-hosted text view setup.
+        tv.minSize = NSSize(width: 0, height: 0)
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                             height: CGFloat.greatestFiniteMagnitude)
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+        if let container = tv.textContainer {
+            container.widthTracksTextView = true
+            container.containerSize = NSSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude)
+        }
         // Lightweight placeholder via accessibility hint (NSTextView has
         // no real placeholder API; intro label above sets expectation).
         tv.setAccessibilityPlaceholderValue(placeholder)

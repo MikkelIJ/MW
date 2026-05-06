@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.34 — 2026-05-06
+
+### Fixed
+- **Report a Bug** description and steps fields now actually show the
+  characters you type. The bare `NSTextView` had a zero-sized text
+  container inside its scroll view, so glyphs were laid out
+  off-screen while the caret kept blinking; the container is now
+  configured to track the scroll view width.
+
 ## v0.7.33 — 2026-05-05
 
 ### Fixed
