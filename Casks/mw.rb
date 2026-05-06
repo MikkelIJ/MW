@@ -1,6 +1,6 @@
 cask "mw" do
-  version "0.7.33"
-  sha256 "eb3245ac5582d8e8cc20db4c2b5b3beb7524f58d6c3216d98f840f74917960de"
+  version "0.7.34"
+  sha256 "c529af3ee6968501032fc0e6f8f70f42ec212a1c32639def2f6fb04997e00d37"
 
   url "https://github.com/MikkelIJ/MW/releases/download/v#{version}/MW.zip"
   name "Mikkel's Workspace"
@@ -36,10 +36,11 @@ cask "mw" do
     What's new in v#{version}:
 
     ### Fixed
-    - Characters typed into the **Report a Bug** description and steps
-      fields are now visible in dark mode. The previous fix only set the
-      text view's `textColor`, which is ignored for newly typed glyphs;
-      the typing attributes now use the system text color too.
+    - **Report a Bug** description and steps fields now actually show the
+      characters you type. The bare `NSTextView` had a zero-sized text
+      container inside its scroll view, so glyphs were laid out
+      off-screen while the caret kept blinking; the container is now
+      configured to track the scroll view width.
 
     Full release: https://github.com/MikkelIJ/MW/releases/tag/v#{version}
   EOS
